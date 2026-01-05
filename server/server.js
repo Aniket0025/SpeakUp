@@ -83,9 +83,10 @@ const serializeRoom = (room) => {
 };
 
 const remainingSeconds = (room) => {
-    if (!room.startedAt || !room.durationSeconds) return room.durationSeconds || 0;
+    const duration = Number(room?.durationSeconds || 600);
+    if (!room.startedAt) return duration;
     const elapsed = Math.floor((Date.now() - room.startedAt) / 1000);
-    return Math.max(0, room.durationSeconds - elapsed);
+    return Math.max(0, duration - elapsed);
 };
 
 const cleanupGdRoomIfEmpty = (roomId) => {
@@ -147,9 +148,9 @@ const roomFromDb = (doc) => {
         status: doc.status,
         createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
         startedAt: doc.startedAt ? new Date(doc.startedAt).getTime() : null,
-        durationSeconds: doc.durationSeconds,
+        durationSeconds: Number(doc.durationSeconds || 600),
         countdownStartedAt: doc.countdownStartedAt ? new Date(doc.countdownStartedAt).getTime() : null,
-        countdownSeconds: doc.countdownSeconds || 10,
+        countdownSeconds: Number(doc.countdownSeconds || 10),
         participants,
     };
 };

@@ -57,6 +57,8 @@ export default function GDMeetPage() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const zegoRef = useRef<any>(null)
   const recognitionRef = useRef<any>(null)
+  const hasBeenActiveRef = useRef(false)
+  const manualExitRef = useRef(false)
 
   const [room, setRoom] = useState<GdRoom | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
@@ -111,7 +113,12 @@ export default function GDMeetPage() {
         // Skip Zego's built-in pre-join name screen and enter the room directly
         showPreJoinView: false,
         onLeaveRoom: () => {
-          leaveMeeting()
+          // Zego can trigger onLeaveRoom unexpectedly (network/perms). Avoid redirect loops.
+          if (manualExitRef.current || room?.status !== "active") {
+            leaveMeeting()
+          } else {
+            setError("Call ended unexpectedly. Please check mic/camera permissions and network.")
+          }
         },
       })
     } catch (e: any) {
@@ -128,6 +135,7 @@ export default function GDMeetPage() {
   }
 
   const leaveMeeting = () => {
+    manualExitRef.current = true
     try {
       socketRef.current?.emit("gd:leave", { roomId }, () => {})
     } catch {}
@@ -136,6 +144,7 @@ export default function GDMeetPage() {
 
   const endMeeting = () => {
     if (!socketRef.current) return
+    manualExitRef.current = true
     socketRef.current.emit("gd:end", { roomId }, () => {
       router.push("/explore/gd")
     })
@@ -205,8 +214,12 @@ export default function GDMeetPage() {
 
     socket.on("gd:room", (data: GdRoom) => {
       setRoom(data)
-      if (data.status === "waiting") {
-        router.replace(`/explore/gd/room/${data.roomId}/waiting`)
+      if (data.status === "active") {
+        hasBeenActiveRef.current = true
+        setError(null)
+      }
+      if (data.status === "waiting" && !hasBeenActiveRef.current) {
+        setError("Waiting for host to start...")
       } else if (data.status === "active" && !recognitionRef.current) {
         // Room became active while connected – start local speech recognition for this user
         try {
@@ -254,6 +267,56 @@ export default function GDMeetPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, token])
+
+  // Fallback polling (helps when Socket.IO is blocked on some networks/devices)
+  useEffect(() => {
+    if (!token || !roomId) return
+    let stopped = false
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/gd/rooms/${encodeURIComponent(roomId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) return
+        if (stopped) return
+
+        const rawRoom = data?.room
+        if (rawRoom) {
+          setRoom((prev) => ({
+            ...(prev || {}),
+            ...rawRoom,
+            participants: Array.isArray(rawRoom.participants)
+              ? rawRoom.participants.map((p: any) => ({ userId: String(p.user || p.userId || ""), name: String(p.name || "") }))
+              : [],
+          }))
+        }
+        if (typeof data?.remainingSeconds === "number") {
+          setRemainingSeconds(data.remainingSeconds)
+        }
+
+        const status = rawRoom?.status
+        if (status === "active") {
+          hasBeenActiveRef.current = true
+          setError(null)
+        }
+        if (status === "completed") {
+          router.replace("/explore/gd")
+        }
+        if (status === "waiting" && !hasBeenActiveRef.current) {
+          setError("Waiting for host to start...")
+        }
+      } catch {}
+    }
+
+    tick()
+    const interval = setInterval(tick, 2000)
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [roomId, token, router])
 
   useEffect(() => {
     if (!loading && room?.status === "active") {

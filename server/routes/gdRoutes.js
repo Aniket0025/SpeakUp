@@ -85,7 +85,7 @@ router.get("/rooms/:roomId", authenticate, async (req, res) => {
         if (!room) return res.status(404).json({ message: "Room not found" });
 
         const startedAt = room.startedAt ? new Date(room.startedAt).getTime() : null;
-        const durationSeconds = Number(room.durationSeconds || 0);
+        const durationSeconds = Number(room.durationSeconds || 600);
         const remainingSeconds = startedAt ? Math.max(0, durationSeconds - Math.floor((Date.now() - startedAt) / 1000)) : durationSeconds;
 
         return res.status(200).json({ room, remainingSeconds });
