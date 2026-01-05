@@ -22,7 +22,7 @@ dotenv.config({ path: path.join(__dirname, ".env") });
 
 const app = express();
 
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 
 connectDB();
@@ -44,6 +44,8 @@ const io = new SocketIOServer(server, {
         origin: process.env.CLIENT_ORIGIN
             ? process.env.CLIENT_ORIGIN.split(",").map((s) => s.trim()).filter(Boolean)
             : true,
+        credentials: true,
+        allowedHeaders: ["Authorization", "Content-Type"],
         methods: ["GET", "POST"],
     },
 });

@@ -54,11 +54,18 @@ export default function GDWaitingPage() {
       return
     }
 
-    const socket = io(API_BASE_URL, { auth: { token } })
+    const socket = io(API_BASE_URL, {
+      auth: { token },
+      transports: ["websocket", "polling"],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+    })
     socketRef.current = socket
 
     socket.on("connect_error", (e: any) => {
-      setError(e?.message || "Connection failed")
+      setError(`${e?.message || "Connection failed"} (server: ${API_BASE_URL})`)
     })
 
     socket.on("gd:room", (data: GdRoom) => {
@@ -124,6 +131,41 @@ export default function GDWaitingPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, token])
+
+  // Fallback polling (helps when Socket.IO is blocked on some networks/devices)
+  useEffect(() => {
+    if (!token || !roomId) return
+    let stopped = false
+
+    const tick = async () => {
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/gd/rooms/${encodeURIComponent(roomId)}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        const data = await res.json().catch(() => null)
+        if (!res.ok) return
+        if (stopped) return
+
+        const nextRoom = data?.room
+        if (nextRoom) {
+          setRoom(nextRoom)
+          if (nextRoom.status === "active") {
+            router.replace(`/explore/gd/room/${roomId}/meet`)
+          }
+          if (nextRoom.status === "completed") {
+            router.replace("/explore/gd")
+          }
+        }
+      } catch {}
+    }
+
+    tick()
+    const interval = setInterval(tick, 2000)
+    return () => {
+      stopped = true
+      clearInterval(interval)
+    }
+  }, [roomId, token, router])
 
   const copyRoomId = async () => {
     try {

@@ -189,11 +189,18 @@ export default function GDMeetPage() {
     }
     if (!roomId) return
 
-    const socket = io(API_BASE_URL, { auth: { token } })
+    const socket = io(API_BASE_URL, {
+      auth: { token },
+      transports: ["websocket", "polling"],
+      timeout: 20000,
+      reconnection: true,
+      reconnectionAttempts: 10,
+      reconnectionDelay: 1000,
+    })
     socketRef.current = socket
 
     socket.on("connect_error", (e: any) => {
-      setError(e?.message || "Connection failed")
+      setError(`${e?.message || "Connection failed"} (server: ${API_BASE_URL})`)
     })
 
     socket.on("gd:room", (data: GdRoom) => {
