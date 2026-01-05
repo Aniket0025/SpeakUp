@@ -1,11 +1,15 @@
 "use client"
 
-import { useState } from "react"
-import { Plus, Search, ArrowRight, ArrowLeft, Users, Clock, Copy, Check } from "lucide-react"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useAuth } from "@/hooks/use-auth"
+import { ArrowLeft, ArrowRight, Check, Copy, Plus, Search, Users } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { type FormEvent, useState } from "react"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
 
 interface CustomRoomModalProps {
   open: boolean
@@ -18,12 +22,21 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
   const [currentView, setCurrentView] = useState<View>("menu")
   const [roomCode, setRoomCode] = useState("")
   const [copied, setCopied] = useState(false)
+  const [joinCode, setJoinCode] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const router = useRouter()
+  const { token } = useAuth()
 
   // <CHANGE> Reset view when modal closes
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
       setCurrentView("menu")
       setRoomCode("")
+      setJoinCode("")
+      setError(null)
+      setBusy(false)
     }
     onOpenChange(isOpen)
   }
@@ -36,17 +49,44 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
   }
 
   // <CHANGE> Function to create room
-  const handleCreateRoom = (e: React.FormEvent<HTMLFormElement>) => {
+  const handleCreateRoom = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault()
+    setError(null)
+    if (!token) {
+      setError("Please login to create a room")
+      return
+    }
+    if (busy) return
+    setBusy(true)
+
     const formData = new FormData(e.currentTarget)
-    const generatedCode = Math.random().toString(36).substring(2, 8).toUpperCase()
-    setRoomCode(generatedCode)
-    console.log("[v0] Room created:", {
-      name: formData.get("roomName"),
-      topic: formData.get("topic"),
-      participants: formData.get("participants"),
-      code: generatedCode,
-    })
+    const roomName = String(formData.get("roomName") || "Custom GD Room")
+    const topic = String(formData.get("topic") || "")
+    const maxParticipants = Number(formData.get("participants") || 5)
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/gd/rooms`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ roomName, topic, maxParticipants, durationSeconds: 10 * 60 }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setError(data?.message || "Failed to create room")
+        return
+      }
+      const id = String(data?.roomId || "").toUpperCase()
+      setRoomCode(id)
+      handleOpenChange(false)
+      router.push(`/explore/gd/room/${id}/waiting`)
+    } catch (err: any) {
+      setError(err?.message || "Failed to create room")
+    } finally {
+      setBusy(false)
+    }
   }
 
   // <CHANGE> Sample room data for browse view
@@ -244,9 +284,47 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
             placeholder="Enter 6-digit code"
             maxLength={6}
             className="h-14 rounded-xl text-center text-2xl font-bold tracking-wider uppercase"
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
           />
         </div>
-        <Button className="w-full h-12 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500">Join Room</Button>
+        {error && <p className="text-sm text-red-600 font-medium">{error}</p>}
+        <Button
+          disabled={!joinCode.trim() || !token || busy}
+          className="w-full h-12 rounded-xl bg-gradient-to-r from-pink-500 to-rose-500"
+          onClick={async () => {
+            setError(null)
+            if (!token) {
+              setError("Please login to join a room")
+              return
+            }
+            if (busy) return
+            const id = joinCode.trim().toUpperCase()
+            setBusy(true)
+            try {
+              const res = await fetch(`${API_BASE_URL}/api/gd/rooms/${encodeURIComponent(id)}/join`, {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+              })
+              const data = await res.json().catch(() => null)
+              if (!res.ok) {
+                setError(data?.message || "Failed to join room")
+                return
+              }
+              handleOpenChange(false)
+              router.push(`/explore/gd/room/${id}/waiting`)
+            } catch (err: any) {
+              setError(err?.message || "Failed to join room")
+            } finally {
+              setBusy(false)
+            }
+          }}
+        >
+          Join Room
+        </Button>
       </div>
     </div>
   )

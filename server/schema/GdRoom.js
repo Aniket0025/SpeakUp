@@ -1,0 +1,30 @@
+import mongoose from "mongoose";
+
+const gdParticipantSchema = new mongoose.Schema(
+    {
+        user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        name: { type: String, required: true },
+        joinedAt: { type: Date, default: Date.now },
+        lastSeenAt: { type: Date, default: Date.now },
+    },
+    { _id: false }
+);
+
+const gdRoomSchema = new mongoose.Schema(
+    {
+        roomId: { type: String, required: true, unique: true, index: true },
+        roomName: { type: String, required: true },
+        topic: { type: String, default: "" },
+        maxParticipants: { type: Number, default: 5 },
+        durationSeconds: { type: Number, default: 600 },
+        hostUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+        status: { type: String, enum: ["waiting", "active", "completed"], default: "waiting" },
+        startedAt: { type: Date },
+        endedAt: { type: Date },
+        participants: { type: [gdParticipantSchema], default: [] },
+    },
+    { timestamps: true }
+);
+
+const GdRoom = mongoose.model("GdRoom", gdRoomSchema);
+export default GdRoom;

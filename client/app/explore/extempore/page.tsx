@@ -57,6 +57,9 @@ export default function ExtemporePage() {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState("")
   const [interimTranscript, setInterimTranscript] = useState("")
+  const [cameraError, setCameraError] = useState<string | null>(null)
+  const [availableCameras, setAvailableCameras] = useState<MediaDeviceInfo[]>([])
+  const [selectedCameraId, setSelectedCameraId] = useState<string | null>(null)
 
   const socketRef = useRef<Socket | null>(null)
   const videoRef = useRef<HTMLVideoElement | null>(null)
@@ -76,6 +79,66 @@ export default function ExtemporePage() {
         el.onloadedmetadata = playSafe
       }
     }
+  }
+
+  const openCamera = async (deviceId?: string): Promise<boolean> => {
+    try {
+      // Ensure any prior tracks are stopped before opening a new one
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+        mediaStreamRef.current = null
+      }
+      let stream: MediaStream | null = null
+      // Try a generic request first (works even when enumerateDevices lacks labels or is empty pre-permission)
+      try {
+        if (deviceId) {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: deviceId } }, audio: false })
+        } else {
+          stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false })
+        }
+      } catch (firstErr: any) {
+        // If first attempt fails, try to pick an explicit device (if any)
+        try {
+          const devices = await navigator.mediaDevices.enumerateDevices()
+          const cameras = devices.filter((d) => d.kind === "videoinput")
+          setAvailableCameras(cameras)
+          if (!selectedCameraId && cameras[0]) setSelectedCameraId(cameras[0].deviceId)
+          if (cameras.length) {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: (selectedCameraId || cameras[0].deviceId) } }, audio: false })
+          } else {
+            throw firstErr
+          }
+        } catch {
+          throw firstErr
+        }
+      }
+
+      mediaStreamRef.current = stream
+      if (videoRef.current) {
+        ;(videoRef.current as any).srcObject = stream
+        await videoRef.current.play().catch(() => {})
+      }
+      setCameraOn(true)
+      setCameraError(null)
+      return true
+    } catch (err: any) {
+      const name = err?.name || "Error"
+      if (name === "NotAllowedError") setCameraError("Camera permission denied")
+      else if (name === "NotFoundError") setCameraError("No camera device found")
+      else if (name === "NotReadableError") setCameraError("Camera is in use by another app")
+      else setCameraError("Unable to start camera")
+      setCameraOn(false)
+      return false
+    }
+  }
+
+  const refreshCameras = async () => {
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices()
+      const cams = devices.filter((d) => d.kind === "videoinput")
+      setAvailableCameras(cams)
+      if (!selectedCameraId && cams[0]) setSelectedCameraId(cams[0].deviceId)
+    } catch {}
   }
 
   const handleStartPractice = async () => {
@@ -148,20 +211,10 @@ export default function ExtemporePage() {
     }, 1000)
 
     // Start camera (always try when practice begins)
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-      mediaStreamRef.current = stream
-      if (videoRef.current) {
-        ;(videoRef.current as any).srcObject = stream
-        await videoRef.current.play().catch(() => {})
-      }
-      setCameraOn(true)
-    } catch (err) {
-      console.warn("Camera permission denied or unavailable", err)
-      alert(
-        "Camera could not be started. Please allow camera access for this site in your browser address bar and make sure no other app is using the camera.",
-      )
-      setCameraOn(false)
+    await refreshCameras()
+    const ok = await openCamera(selectedCameraId || undefined)
+    if (!ok) {
+      console.warn("Camera permission denied or unavailable")
     }
 
     // Start speech recognition
@@ -270,17 +323,8 @@ export default function ExtemporePage() {
       cleanupMedia()
       setCameraOn(false)
     } else {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
-        mediaStreamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
-          await videoRef.current.play().catch(() => {})
-        }
-        setCameraOn(true)
-      } catch {
-        setCameraOn(false)
-      }
+      await refreshCameras()
+      await openCamera(selectedCameraId || undefined)
     }
   }
 
@@ -303,6 +347,19 @@ export default function ExtemporePage() {
       stopRecognition()
       if (socketRef.current) socketRef.current.disconnect()
       if (timerRef.current) clearInterval(timerRef.current)
+    }
+  }, [])
+
+  // Refresh camera list when devices change
+  useEffect(() => {
+    const handler = () => refreshCameras()
+    try {
+      navigator.mediaDevices?.addEventListener("devicechange", handler)
+    } catch {}
+    return () => {
+      try {
+        navigator.mediaDevices?.removeEventListener("devicechange", handler)
+      } catch {}
     }
   }, [])
 
@@ -363,8 +420,12 @@ export default function ExtemporePage() {
                     style={{ backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "transform" }}
                   />
                   {!cameraOn && (
-                    <div className="absolute inset-0 flex items-center justify-center text-white text-sm font-bold bg-black/60">
-                      Camera Off
+                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-white text-xs font-bold bg-black/60 p-3 text-center">
+                      <span>{`Camera Off${cameraError ? ` - ${cameraError}` : ""}`}</span>
+                      <div className="flex gap-2">
+                        <button onClick={() => openCamera(selectedCameraId || undefined)} className="px-2 py-1 bg-white/80 text-black rounded shadow">Retry</button>
+                        <button onClick={refreshCameras} className="px-2 py-1 bg-white/60 text-black rounded shadow">Refresh devices</button>
+                      </div>
                     </div>
                   )}
                 </div>
