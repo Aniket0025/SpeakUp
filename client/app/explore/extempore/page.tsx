@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState, useRef } from "react"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,6 +7,7 @@ import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
 import { ArrowLeft, Clock, Mic, MicOff, Play, Square, TrendingUp, Video, VideoOff, Zap } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useCallback, useEffect, useRef, useState } from "react"
 import { io, Socket } from "socket.io-client"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
@@ -53,7 +53,7 @@ export default function ExtemporePage() {
   const [isPracticing, setIsPracticing] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [cameraOn, setCameraOn] = useState(true)
-  const [micOn, setMicOn] = useState(false)
+  const [micOn, setMicOn] = useState(true)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState("")
   const [interimTranscript, setInterimTranscript] = useState("")
@@ -66,20 +66,24 @@ export default function ExtemporePage() {
   const mediaStreamRef = useRef<MediaStream | null>(null)
   const timerRef = useRef<any>(null)
   const recognitionRef = useRef<any>(null)
+  const isPracticingRef = useRef(false)
+  const micOnRef = useRef(false)
 
-  const setVideoRef = (el: HTMLVideoElement | null) => {
+  const setVideoRef = useCallback((el: HTMLVideoElement | null) => {
     videoRef.current = el
+
+    // Avoid blinking: don't reassign srcObject unless the element is actually mounted
+    // or the stream changed. A non-memoized callback ref would be called every render.
     if (el && mediaStreamRef.current) {
-      ;(el as any).srcObject = mediaStreamRef.current
-      // play only after metadata to avoid flicker
-      const playSafe = () => el.play().catch(() => {})
-      if (el.readyState >= 1) {
-        playSafe()
-      } else {
-        el.onloadedmetadata = playSafe
+      const stream = mediaStreamRef.current
+      if ((el as any).srcObject !== stream) {
+        ;(el as any).srcObject = stream
       }
+      const playSafe = () => el.play().catch(() => {})
+      if (el.readyState >= 1) playSafe()
+      else el.onloadedmetadata = playSafe
     }
-  }
+  }, [])
 
   const openCamera = async (deviceId?: string): Promise<boolean> => {
     try {
@@ -115,8 +119,11 @@ export default function ExtemporePage() {
 
       mediaStreamRef.current = stream
       if (videoRef.current) {
-        ;(videoRef.current as any).srcObject = stream
-        await videoRef.current.play().catch(() => {})
+        const el = videoRef.current
+        if ((el as any).srcObject !== stream) {
+          ;(el as any).srcObject = stream
+        }
+        await el.play().catch(() => {})
       }
       setCameraOn(true)
       setCameraError(null)
@@ -198,6 +205,11 @@ export default function ExtemporePage() {
 
     setTimeRemaining(timerMinutes * 60)
     setIsPracticing(true)
+    isPracticingRef.current = true
+
+    // Auto-enable mic + camera for practice (user can turn off manually)
+    setMicOn(true)
+    micOnRef.current = true
 
     // Start timer
     timerRef.current = setInterval(() => {
@@ -218,9 +230,7 @@ export default function ExtemporePage() {
     }
 
     // Start speech recognition
-    if (micOn) {
-      startRecognition()
-    }
+    startRecognition()
   }
 
   const handleStopPractice = () => {
@@ -235,6 +245,7 @@ export default function ExtemporePage() {
       )
     }
 
+    isPracticingRef.current = false
     cleanupMedia()
     stopRecognition()
     if (SEND_TO_SERVER && socketRef.current) {
@@ -253,6 +264,7 @@ export default function ExtemporePage() {
     if (!SR) {
       alert("Speech recognition is not supported in this browser. Please use Chrome.")
       setMicOn(false)
+      micOnRef.current = false
       return
     }
     const recognition = new SR()
@@ -285,7 +297,7 @@ export default function ExtemporePage() {
     recognition.onerror = () => {}
     recognition.onend = () => {
       // Auto-restart while practicing and mic is on
-      if (isPracticing && micOn) {
+      if (isPracticingRef.current && micOnRef.current) {
         try {
           recognition.start()
         } catch {}
@@ -334,11 +346,21 @@ export default function ExtemporePage() {
     if (micOn) {
       stopRecognition()
       setMicOn(false)
+      micOnRef.current = false
     } else {
       setMicOn(true)
+      micOnRef.current = true
       startRecognition()
     }
   }
+
+  useEffect(() => {
+    isPracticingRef.current = isPracticing
+  }, [isPracticing])
+
+  useEffect(() => {
+    micOnRef.current = micOn
+  }, [micOn])
 
   // Cleanup on unmount
   useEffect(() => {
@@ -365,8 +387,11 @@ export default function ExtemporePage() {
 
   useEffect(() => {
     if (isPracticing && cameraOn && mediaStreamRef.current && videoRef.current) {
-      ;(videoRef.current as any).srcObject = mediaStreamRef.current
       const el = videoRef.current
+      const stream = mediaStreamRef.current
+      if ((el as any).srcObject !== stream) {
+        ;(el as any).srcObject = stream
+      }
       const playSafe = () => el.play().catch(() => {})
       if (el.readyState >= 1) playSafe()
       else el.onloadedmetadata = playSafe

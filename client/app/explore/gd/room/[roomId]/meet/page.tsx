@@ -33,7 +33,7 @@ export default function GDMeetPage() {
   const params = useParams<{ roomId?: string }>()
   const roomId = useMemo(() => String(params?.roomId || "").trim().toUpperCase(), [params?.roomId])
   const router = useRouter()
-  const { token } = useAuth()
+  const { token, user } = useAuth()
 
   const socketRef = useRef<Socket | null>(null)
   const screenRef = useRef<HTMLDivElement | null>(null)
@@ -101,7 +101,15 @@ export default function GDMeetPage() {
   }
 
   const leaveMeeting = () => {
-    router.push(`/explore/gd/room/${roomId}/waiting`)
+    try { socketRef.current?.emit("gd:leave", { roomId }, () => {}) } catch {}
+    router.push("/explore/gd")
+  }
+
+  const endMeeting = () => {
+    if (!socketRef.current || !room || !user) return
+    socketRef.current.emit("gd:end", { roomId }, () => {
+      router.push("/explore/gd")
+    })
   }
 
   useEffect(() => {
@@ -130,7 +138,7 @@ export default function GDMeetPage() {
     })
 
     socket.on("gd:ended", () => {
-      setError("GD ended")
+      router.replace("/explore/gd")
     })
 
     socket.emit("gd:join", { roomId }, (res: any) => {
@@ -151,9 +159,6 @@ export default function GDMeetPage() {
     })
 
     return () => {
-      try {
-        socket.emit("gd:leave", { roomId })
-      } catch {}
       try {
         socket.disconnect()
       } catch {}
@@ -218,13 +223,23 @@ export default function GDMeetPage() {
                 <Expand className="h-4 w-4 mr-2" />
                 Fullscreen
               </Button>
-              <Button
-                className="rounded-xl bg-red-600 hover:bg-red-700"
-                onClick={leaveMeeting}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Leave
-              </Button>
+              {!(user && room && String(user.id) === String(room.hostUserId)) && (
+                <Button
+                  className="rounded-xl bg-red-600 hover:bg-red-700"
+                  onClick={leaveMeeting}
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Leave
+                </Button>
+              )}
+              {user && room && String(user.id) === String(room.hostUserId) && (
+                <Button
+                  className="rounded-xl bg-red-700 hover:bg-red-800"
+                  onClick={endMeeting}
+                >
+                  End Room
+                </Button>
+              )}
             </div>
           </div>
 

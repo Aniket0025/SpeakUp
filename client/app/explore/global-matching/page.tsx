@@ -2,15 +2,19 @@
 
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
-import { ArrowLeft, Globe, Users, Clock, Sparkles } from "lucide-react"
-import Link from "next/link"
-import { useEffect } from "react"
-import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
+import { ArrowLeft, Clock, Globe, Sparkles, Users } from "lucide-react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
+import { useEffect, useState } from "react"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
 
 export default function GlobalMatchingPage() {
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, token } = useAuth()
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login")
@@ -54,7 +58,7 @@ export default function GlobalMatchingPage() {
               <ul className="space-y-3 mb-6">
                 <li className="flex items-center gap-3 text-gray-700">
                   <span className="h-2 w-2 rounded-full bg-orange-500" />
-                  Auto-matched groups of 3 participants
+                  Auto-matched groups of up to 6 participants
                 </li>
                 <li className="flex items-center gap-3 text-gray-700">
                   <span className="h-2 w-2 rounded-full bg-blue-500" />
@@ -67,9 +71,39 @@ export default function GlobalMatchingPage() {
               </ul>
 
               {/* Start Button */}
-              <Button className="bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white font-semibold px-8 py-6 rounded-xl shadow-lg shadow-violet-500/25">
+              {error && <p className="text-sm font-semibold text-red-600 mb-3">{error}</p>}
+              <Button
+                disabled={busy}
+                onClick={async () => {
+                  setError(null)
+                  if (!token) {
+                    router.push("/login")
+                    return
+                  }
+                  if (busy) return
+                  setBusy(true)
+                  try {
+                    const res = await fetch(`${API_BASE_URL}/api/gd/global/join`, {
+                      method: "POST",
+                      headers: { Authorization: `Bearer ${token}` },
+                    })
+                    const data = await res.json().catch(() => null)
+                    if (!res.ok) {
+                      setError(data?.message || "Failed to start global match")
+                      return
+                    }
+                    const roomId = String(data?.roomId || "").toUpperCase()
+                    router.push(`/explore/gd/room/${roomId}/waiting`)
+                  } catch (e: any) {
+                    setError(e?.message || "Failed to start global match")
+                  } finally {
+                    setBusy(false)
+                  }
+                }}
+                className="bg-gradient-to-r from-violet-500 to-indigo-600 hover:from-violet-600 hover:to-indigo-700 text-white font-semibold px-8 py-6 rounded-xl shadow-lg shadow-violet-500/25"
+              >
                 <Sparkles className="h-5 w-5 mr-2" />
-                Start Now
+                {busy ? "Finding Match..." : "Start Now"}
               </Button>
 
               <p className="text-sm text-gray-400 mt-4">
@@ -84,7 +118,7 @@ export default function GlobalMatchingPage() {
                   <Users className="h-4 w-4" />
                   TEAM SIZE
                 </div>
-                <p className="text-2xl font-bold text-gray-900">3 participants</p>
+                <p className="text-2xl font-bold text-gray-900">6 participants</p>
               </div>
 
               <div className="mb-6">

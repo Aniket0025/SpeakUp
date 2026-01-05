@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
 import { ArrowLeft, ArrowRight, Check, Copy, Plus, Search, Users } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { type FormEvent, useState } from "react"
+import { type FormEvent, useEffect, useState } from "react"
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
 
@@ -29,6 +29,33 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
   const router = useRouter()
   const { token } = useAuth()
 
+  const [rooms, setRooms] = useState<
+    Array<{ roomId: string; roomName: string; topic: string; maxParticipants: number; participantsCount: number; hostName: string | null }>
+  >([])
+  const [roomsLoading, setRoomsLoading] = useState(false)
+  const [roomsError, setRoomsError] = useState<string | null>(null)
+
+  const fetchRooms = async () => {
+    if (!token) return
+    setRoomsError(null)
+    setRoomsLoading(true)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/gd/rooms?status=waiting&mode=custom`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setRoomsError(data?.message || "Failed to load rooms")
+        return
+      }
+      setRooms(Array.isArray(data?.rooms) ? data.rooms : [])
+    } catch (e: any) {
+      setRoomsError(e?.message || "Failed to load rooms")
+    } finally {
+      setRoomsLoading(false)
+    }
+  }
+
   // <CHANGE> Reset view when modal closes
   const handleOpenChange = (isOpen: boolean) => {
     if (!isOpen) {
@@ -40,6 +67,18 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
     }
     onOpenChange(isOpen)
   }
+
+  useEffect(() => {
+    let interval: any
+    if (open && currentView === "browse" && token) {
+      fetchRooms()
+      interval = setInterval(fetchRooms, 5000)
+    }
+    return () => {
+      if (interval) clearInterval(interval)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, currentView, token])
 
   // <CHANGE> Function to copy room code
   const handleCopyCode = () => {
@@ -89,12 +128,32 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
     }
   }
 
-  // <CHANGE> Sample room data for browse view
-  const availableRooms = [
-    { id: 1, name: "Tech Discussion", host: "John Doe", participants: "3/5", topic: "AI Ethics" },
-    { id: 2, name: "Current Affairs", host: "Jane Smith", participants: "2/4", topic: "Climate Change" },
-    { id: 3, name: "Business Talk", host: "Mike Johnson", participants: "4/6", topic: "Startup Culture" },
-  ]
+  const handleJoinListedRoom = async (id: string) => {
+    if (!token) {
+      setError("Please login to join a room")
+      return
+    }
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/gd/rooms/${encodeURIComponent(id)}/join`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) {
+        setError(data?.message || "Failed to join room")
+        return
+      }
+      handleOpenChange(false)
+      router.push(`/explore/gd/room/${id}/waiting`)
+    } catch (e: any) {
+      setError(e?.message || "Failed to join room")
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const renderMenu = () => (
     <div className="space-y-3 mt-4">
@@ -239,30 +298,44 @@ export function CustomRoomModal({ open, onOpenChange }: CustomRoomModalProps) {
         Back
       </Button>
 
+      {roomsError && <p className="text-sm font-semibold text-red-600">{roomsError}</p>}
       <div className="space-y-3 max-h-96 overflow-y-auto">
-        {availableRooms.map((room) => (
-          <div
-            key={room.id}
-            className="p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow"
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h4 className="font-bold text-gray-900">{room.name}</h4>
-                <p className="text-sm text-gray-500">Hosted by {room.host}</p>
+        {roomsLoading && rooms.length === 0 && (
+          <div className="p-4 text-sm text-gray-500">Loading rooms...</div>
+        )}
+        {!roomsLoading && rooms.length === 0 && (
+          <div className="p-4 text-sm text-gray-500">No waiting rooms available right now.</div>
+        )}
+        {rooms.map((r) => {
+          const full = r.participantsCount >= r.maxParticipants
+          return (
+            <div
+              key={r.roomId}
+              className="p-4 rounded-2xl bg-white border border-gray-100 shadow-sm hover:shadow-md transition-shadow"
+            >
+              <div className="flex items-start justify-between mb-3">
+                <div>
+                  <h4 className="font-bold text-gray-900">{r.roomName}</h4>
+                  <p className="text-sm text-gray-500">Hosted by {r.hostName || "—"}</p>
+                </div>
+                <div className="flex items-center gap-1 text-sm font-medium text-gray-600 bg-gray-50 px-3 py-1 rounded-full">
+                  <Users className="h-3.5 w-3.5" />
+                  {r.participantsCount}/{r.maxParticipants}
+                </div>
               </div>
-              <div className="flex items-center gap-1 text-sm font-medium text-gray-600 bg-gray-50 px-3 py-1 rounded-full">
-                <Users className="h-3.5 w-3.5" />
-                {room.participants}
-              </div>
+              <p className="text-sm text-gray-600 mb-3">
+                <span className="font-medium">Topic:</span> {r.topic || "—"}
+              </p>
+              <Button
+                disabled={full || busy}
+                onClick={() => handleJoinListedRoom(r.roomId)}
+                className="w-full h-10 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-600 disabled:opacity-60"
+              >
+                {full ? "Room Full" : "Join Room"}
+              </Button>
             </div>
-            <p className="text-sm text-gray-600 mb-3">
-              <span className="font-medium">Topic:</span> {room.topic}
-            </p>
-            <Button className="w-full h-10 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-600">
-              Join Room
-            </Button>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )

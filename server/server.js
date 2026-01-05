@@ -49,6 +49,8 @@ const io = new SocketIOServer(server, {
 // In-memory GD rooms (ephemeral; resets on server restart)
 const gdRooms = new Map();
 const gdTimers = new Map();
+const gdCountdownTimers = new Map();
+const gdDisconnectCleanup = new Map();
 
 const gdRoomSocketName = (roomId) => `gd:${roomId}`;
 
@@ -63,12 +65,15 @@ const serializeRoom = (room) => {
         roomId: room.roomId,
         roomName: room.roomName,
         topic: room.topic,
+        mode: room.mode,
         maxParticipants: room.maxParticipants,
         hostUserId: room.hostUserId,
         status: room.status,
         createdAt: room.createdAt,
         startedAt: room.startedAt,
         durationSeconds: room.durationSeconds,
+        countdownStartedAt: room.countdownStartedAt || null,
+        countdownSeconds: room.countdownSeconds || 10,
         participants,
     };
 };
@@ -88,7 +93,38 @@ const cleanupGdRoomIfEmpty = (roomId) => {
         clearInterval(t);
         gdTimers.delete(roomId);
     }
+    const c = gdCountdownTimers.get(roomId);
+    if (c) {
+        clearInterval(c);
+        gdCountdownTimers.delete(roomId);
+    }
     gdRooms.delete(roomId);
+};
+
+const cancelDisconnectCleanup = (roomId, userId) => {
+    const key = `${roomId}:${userId}`;
+    const t = gdDisconnectCleanup.get(key);
+    if (t) {
+        clearTimeout(t);
+        gdDisconnectCleanup.delete(key);
+    }
+};
+
+const scheduleDisconnectCleanup = (roomId, userId) => {
+    const id = String(roomId || "").trim().toUpperCase();
+    const uid = String(userId || "");
+    const key = `${id}:${uid}`;
+    cancelDisconnectCleanup(id, uid);
+    const t = setTimeout(() => {
+        try {
+            // If user rejoined in the meantime, do nothing
+            const room = gdRooms.get(id);
+            if (room && room.participants.has(uid)) return;
+            GdRoom.updateOne({ roomId: id }, { $pull: { participants: { user: uid } } }).catch(() => { });
+        } catch { }
+        gdDisconnectCleanup.delete(key);
+    }, 15000);
+    gdDisconnectCleanup.set(key, t);
 };
 
 const roomFromDb = (doc) => {
@@ -101,12 +137,15 @@ const roomFromDb = (doc) => {
         roomId: doc.roomId,
         roomName: doc.roomName,
         topic: doc.topic,
+        mode: doc.mode || "custom",
         maxParticipants: doc.maxParticipants,
         hostUserId: doc.hostUserId ? String(doc.hostUserId) : null,
         status: doc.status,
         createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
         startedAt: doc.startedAt ? new Date(doc.startedAt).getTime() : null,
         durationSeconds: doc.durationSeconds,
+        countdownStartedAt: doc.countdownStartedAt ? new Date(doc.countdownStartedAt).getTime() : null,
+        countdownSeconds: doc.countdownSeconds || 10,
         participants,
     };
 };
@@ -149,6 +188,82 @@ const ensureTimerIfActive = (roomId, room) => {
     gdTimers.set(id, interval);
 };
 
+const countdownRemaining = (room) => {
+    const total = Number(room?.countdownSeconds || 10);
+    if (!room?.countdownStartedAt) return total;
+    const elapsed = Math.floor((Date.now() - room.countdownStartedAt) / 1000);
+    return Math.max(0, total - elapsed);
+};
+
+const cancelCountdown = async (roomId, room) => {
+    const id = String(roomId || "").trim().toUpperCase();
+    const existing = gdCountdownTimers.get(id);
+    if (existing) {
+        clearInterval(existing);
+        gdCountdownTimers.delete(id);
+    }
+    if (room) {
+        room.countdownStartedAt = null;
+        try {
+            await GdRoom.updateOne({ roomId: id }, { $unset: { countdownStartedAt: "" } });
+        } catch { }
+    }
+};
+
+const ensureCountdownIfFull = async (roomId, room) => {
+    const id = String(roomId || "").trim().toUpperCase();
+    if (!room || room.status !== "waiting") return;
+    if (room.mode !== "global") return;
+
+    if (room.participants.size < room.maxParticipants) {
+        if (room.countdownStartedAt) await cancelCountdown(id, room);
+        return;
+    }
+
+    if (!room.countdownStartedAt) {
+        room.countdownStartedAt = Date.now();
+        await GdRoom.updateOne({ roomId: id }, { $set: { countdownStartedAt: new Date(room.countdownStartedAt) } });
+    }
+
+    const tick = async () => {
+        const r = gdRooms.get(id);
+        if (!r) return;
+        if (r.status !== "waiting" || r.mode !== "global") {
+            await cancelCountdown(id, r);
+            return;
+        }
+        if (r.participants.size < r.maxParticipants) {
+            await cancelCountdown(id, r);
+            io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(r));
+            return;
+        }
+        const rem = countdownRemaining(r);
+        io.to(gdRoomSocketName(id)).emit("gd:countdown", { roomId: id, remainingSeconds: rem });
+        if (rem <= 0) {
+            await cancelCountdown(id, r);
+            r.status = "active";
+            r.startedAt = Date.now();
+            await GdRoom.updateOne({ roomId: id }, { $set: { status: "active", startedAt: new Date(r.startedAt) } });
+            io.to(gdRoomSocketName(id)).emit("gd:started", { roomId: id, startedAt: r.startedAt, durationSeconds: r.durationSeconds });
+            io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(r));
+            const existingTimer = gdTimers.get(id);
+            if (existingTimer) {
+                clearInterval(existingTimer);
+                gdTimers.delete(id);
+            }
+            ensureTimerIfActive(id, r);
+        }
+    };
+
+    await tick();
+    if (!gdCountdownTimers.get(id)) {
+        const interval = setInterval(() => {
+            tick().catch(() => { });
+        }, 1000);
+        gdCountdownTimers.set(id, interval);
+    }
+};
+
 // Socket auth middleware using JWT
 io.use(async (socket, next) => {
     try {
@@ -175,12 +290,15 @@ io.on("connection", (socket) => {
                 roomId,
                 roomName: String(roomName || "Custom GD Room"),
                 topic: String(topic || ""),
+                mode: "custom",
                 maxParticipants: Math.max(2, Math.min(10, Number(maxParticipants || 5))),
                 hostUserId: uid,
                 status: "waiting",
                 createdAt: Date.now(),
                 startedAt: null,
                 durationSeconds: Number(durationSeconds || 600),
+                countdownStartedAt: null,
+                countdownSeconds: 10,
                 participants: new Map(),
             };
             room.participants.set(uid, { socketId: socket.id, userId: uid, name: socket.user.fullName });
@@ -190,8 +308,10 @@ io.on("connection", (socket) => {
                 roomId,
                 roomName: room.roomName,
                 topic: room.topic,
+                mode: "custom",
                 maxParticipants: room.maxParticipants,
                 durationSeconds: room.durationSeconds,
+                countdownSeconds: 10,
                 hostUserId: socket.user._id,
                 status: "waiting",
                 participants: [{ user: socket.user._id, name: socket.user.fullName, joinedAt: new Date(), lastSeenAt: new Date() }],
@@ -207,6 +327,34 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("gd:end", async (payload, cb) => {
+        try {
+            const { roomId } = payload || {};
+            const id = String(roomId || "").trim().toUpperCase();
+            const room = (await hydrateGdRoom(id)) || gdRooms.get(id);
+            if (!room) return cb?.({ ok: false, error: "Room not found" });
+            if (String(room.hostUserId) !== String(socket.user._id)) return cb?.({ ok: false, error: "Only host can end" });
+
+            // Mark completed and clear timers/countdowns
+            room.status = "completed";
+            await GdRoom.updateOne({ roomId: id }, { $set: { status: "completed", endedAt: new Date() } });
+
+            const t = gdTimers.get(id);
+            if (t) { clearInterval(t); gdTimers.delete(id); }
+            const c = gdCountdownTimers.get(id);
+            if (c) { clearInterval(c); gdCountdownTimers.delete(id); }
+
+            io.to(gdRoomSocketName(id)).emit("gd:ended", { roomId: id });
+            io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(room));
+
+            // Optionally remove from memory so new joins fail
+            gdRooms.delete(id);
+            cb?.({ ok: true });
+        } catch (err) {
+            cb?.({ ok: false, error: err?.message || "Failed to end room" });
+        }
+    });
+
     socket.on("gd:join", async (payload, cb) => {
         try {
             const { roomId } = payload || {};
@@ -216,6 +364,7 @@ io.on("connection", (socket) => {
             if (room.status === "completed") return cb?.({ ok: false, error: "Room ended" });
 
             const uid = String(socket.user._id);
+            cancelDisconnectCleanup(id, uid);
             const already = room.participants.has(uid);
             if (!already && room.participants.size >= room.maxParticipants) return cb?.({ ok: false, error: "Room is full" });
             room.participants.set(uid, { socketId: socket.id, userId: uid, name: socket.user.fullName });
@@ -234,6 +383,7 @@ io.on("connection", (socket) => {
 
             io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(room));
             ensureTimerIfActive(id, room);
+            await ensureCountdownIfFull(id, room);
             cb?.({ ok: true, room: serializeRoom(room) });
         } catch (err) {
             cb?.({ ok: false, error: err.message || "Failed to join room" });
@@ -247,6 +397,7 @@ io.on("connection", (socket) => {
             const room = (await hydrateGdRoom(id)) || gdRooms.get(id);
             if (!room) return cb?.({ ok: false, error: "Room not found" });
             ensureTimerIfActive(id, room);
+            await ensureCountdownIfFull(id, room);
             cb?.({ ok: true, room: serializeRoom(room), remainingSeconds: remainingSeconds(room) });
         } catch (err) {
             cb?.({ ok: false, error: err.message || "Failed to fetch room" });
@@ -259,6 +410,7 @@ io.on("connection", (socket) => {
             const id = String(roomId || "").trim().toUpperCase();
             const room = (await hydrateGdRoom(id)) || gdRooms.get(id);
             if (!room) return cb?.({ ok: false, error: "Room not found" });
+            if (room.mode === "global") return cb?.({ ok: false, error: "Global match starts automatically" });
             if (String(room.hostUserId) !== String(socket.user._id)) return cb?.({ ok: false, error: "Only host can start" });
             if (room.status !== "waiting") return cb?.({ ok: false, error: "Room already started" });
 
@@ -293,9 +445,11 @@ io.on("connection", (socket) => {
             const room = gdRooms.get(roomId);
             if (!room) return cb?.({ ok: true });
             const uid = String(socket.user._id);
+            cancelDisconnectCleanup(roomId, uid);
             const existing = room.participants.get(uid);
             if (existing?.socketId === socket.id) {
                 room.participants.delete(uid);
+                GdRoom.updateOne({ roomId, }, { $pull: { participants: { user: socket.user._id } } }).catch(() => { });
             }
             socket.leave(gdRoomSocketName(roomId));
             socket.data.gdRoomId = null;
@@ -309,6 +463,9 @@ io.on("connection", (socket) => {
             if (room.participants.size === 0) {
                 cleanupGdRoomIfEmpty(roomId);
             } else {
+                if (room.mode === "global" && room.status === "waiting" && room.participants.size < room.maxParticipants) {
+                    cancelCountdown(roomId, room).catch(() => { });
+                }
                 io.to(gdRoomSocketName(roomId)).emit("gd:room", serializeRoom(room));
             }
             cb?.({ ok: true });
@@ -385,11 +542,16 @@ io.on("connection", (socket) => {
             const existing = room.participants.get(uid);
             if (existing?.socketId === socket.id) {
                 room.participants.delete(uid);
+                scheduleDisconnectCleanup(roomId, uid);
             }
 
             if (room.participants.size === 0) {
                 cleanupGdRoomIfEmpty(roomId);
                 return;
+            }
+
+            if (room.mode === "global" && room.status === "waiting" && room.participants.size < room.maxParticipants) {
+                cancelCountdown(roomId, room).catch(() => { });
             }
 
             // Reassign host if host left

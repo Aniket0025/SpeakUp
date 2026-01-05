@@ -14,12 +14,15 @@ type GdRoom = {
   roomId: string
   roomName: string
   topic: string
+  mode?: "custom" | "global"
   maxParticipants: number
   hostUserId: string | null
   status: "waiting" | "active" | "completed"
   createdAt: number
   startedAt: number | null
   durationSeconds: number
+  countdownStartedAt?: number | null
+  countdownSeconds?: number
   participants: Array<{ userId: string; name: string }>
 }
 
@@ -32,6 +35,7 @@ export default function GDWaitingPage() {
   const socketRef = useRef<Socket | null>(null)
   const [room, setRoom] = useState<GdRoom | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
+  const [countdownRemaining, setCountdownRemaining] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
 
   const isHost = room && user?.id ? String(room.hostUserId) === String(user.id) : false
@@ -57,6 +61,13 @@ export default function GDWaitingPage() {
 
     socket.on("gd:room", (data: GdRoom) => {
       setRoom(data)
+      if (data.mode === "global" && data.status === "waiting" && data.countdownStartedAt) {
+        const total = Number(data.countdownSeconds || 10)
+        const elapsed = Math.floor((Date.now() - Number(data.countdownStartedAt)) / 1000)
+        setCountdownRemaining(Math.max(0, total - elapsed))
+      } else {
+        setCountdownRemaining(null)
+      }
       if (data.status === "active") {
         router.replace(`/explore/gd/room/${data.roomId}/meet`)
       }
@@ -68,6 +79,14 @@ export default function GDWaitingPage() {
 
     socket.on("gd:started", (data: { roomId: string }) => {
       router.replace(`/explore/gd/room/${data.roomId}/meet`)
+    })
+
+    socket.on("gd:countdown", (data: { remainingSeconds: number }) => {
+      setCountdownRemaining(data.remainingSeconds)
+    })
+
+    socket.on("gd:ended", () => {
+      router.replace("/explore/gd")
     })
 
     socket.emit("gd:join", { roomId }, (res: any) => {
@@ -91,9 +110,6 @@ export default function GDWaitingPage() {
     connect()
     return () => {
       try {
-        socketRef.current?.emit("gd:leave", { roomId })
-      } catch {}
-      try {
         socketRef.current?.disconnect()
       } catch {}
       socketRef.current = null
@@ -116,6 +132,24 @@ export default function GDWaitingPage() {
     })
   }
 
+  const isGlobal = room?.mode === "global"
+  const capacityText = room ? `${room.participants.length}/${room.maxParticipants}` : ""
+
+  const leaveRoom = () => {
+    try {
+      socketRef.current?.emit("gd:leave", { roomId }, () => {})
+    } catch {}
+    router.push("/explore/gd")
+  }
+
+  const endRoom = () => {
+    if (!isHost || !socketRef.current) return
+    socketRef.current.emit("gd:end", { roomId }, (res: any) => {
+      // Regardless of ack, route back; server will emit gd:ended to others
+      router.push("/explore/gd")
+    })
+  }
+
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />
@@ -125,17 +159,21 @@ export default function GDWaitingPage() {
           <div className="flex items-start justify-between gap-4">
             <div>
               <h1 className="text-2xl font-extrabold text-gray-900">Waiting Room</h1>
-              <p className="text-gray-500 text-sm mt-1">Room will start when host clicks Start</p>
+              <p className="text-gray-500 text-sm mt-1">
+                {isGlobal ? "Match will start automatically when room is full" : "Room will start when host clicks Start"}
+              </p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500">Room Code</p>
-              <div className="flex items-center justify-end gap-2">
-                <p className="text-lg font-black tracking-wider text-violet-600">{roomId}</p>
-                <button onClick={copyRoomId} className="p-2 rounded-lg hover:bg-gray-50">
-                  <Copy className="h-4 w-4 text-gray-600" />
-                </button>
+            {!isGlobal && (
+              <div className="text-right">
+                <p className="text-xs text-gray-500">Room Code</p>
+                <div className="flex items-center justify-end gap-2">
+                  <p className="text-lg font-black tracking-wider text-violet-600">{roomId}</p>
+                  <button onClick={copyRoomId} className="p-2 rounded-lg hover:bg-gray-50">
+                    <Copy className="h-4 w-4 text-gray-600" />
+                  </button>
+                </div>
               </div>
-            </div>
+            )}
           </div>
 
           {error && <div className="mt-4 text-sm text-red-600 font-medium">{error}</div>}
@@ -159,6 +197,20 @@ export default function GDWaitingPage() {
             <div className="rounded-2xl border border-gray-100 bg-gray-50 p-5">
               <p className="text-sm font-semibold text-gray-800">Topic</p>
               <p className="text-lg font-bold text-gray-900 mt-1">{room?.topic || "—"}</p>
+
+              {room && (
+                <p className="text-sm text-gray-500 mt-4">
+                  Capacity: <span className="font-bold text-gray-800">{capacityText}</span>
+                </p>
+              )}
+
+              {isGlobal && countdownRemaining !== null && (
+                <div className="mt-4 rounded-2xl border border-violet-200 bg-violet-50 px-4 py-3">
+                  <p className="text-xs font-bold text-violet-700">Starting in</p>
+                  <p className="text-3xl font-black text-violet-700">{countdownRemaining}s</p>
+                </div>
+              )}
+
               <p className="text-sm text-gray-500 mt-4">Duration</p>
               <p className="text-2xl font-black text-gray-900">{formatTime(room?.durationSeconds || 0)}</p>
               {room?.status === "active" && (
@@ -168,17 +220,37 @@ export default function GDWaitingPage() {
               )}
 
               <div className="mt-6">
-                <Button
-                  onClick={startRoom}
-                  disabled={!isHost || !room || room.participants.length < 2}
-                  className="w-full h-12 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-600"
-                >
-                  Start GD
-                </Button>
-                {!isHost && <p className="text-xs text-gray-500 mt-2">Only host can start the room.</p>}
-                {isHost && room && room.participants.length < 2 && (
-                  <p className="text-xs text-gray-500 mt-2">Wait for at least 1 more participant to join.</p>
+                {!isGlobal && (
+                  <>
+                    <Button
+                      onClick={startRoom}
+                      disabled={!isHost || !room || room.participants.length < 2}
+                      className="w-full h-12 rounded-xl bg-gradient-to-r from-violet-500 to-indigo-600"
+                    >
+                      Start GD
+                    </Button>
+                    {!isHost && <p className="text-xs text-gray-500 mt-2">Only host can start the room.</p>}
+                    {isHost && room && room.participants.length < 2 && (
+                      <p className="text-xs text-gray-500 mt-2">Wait for at least 1 more participant to join.</p>
+                    )}
+                  </>
                 )}
+
+                {isGlobal && (
+                  <p className="text-xs text-gray-500 mt-2">
+                    Waiting for participants. When the room reaches {room?.maxParticipants || 6}, a 10 second countdown starts.
+                  </p>
+                )}
+
+                {/* Exit / End controls */}
+                <div className="mt-4 flex flex-col sm:flex-row gap-3">
+                  {!isHost && (
+                    <Button variant="outline" onClick={leaveRoom} className="rounded-xl w-full sm:w-auto">Exit Room</Button>
+                  )}
+                  {isHost && (
+                    <Button onClick={endRoom} className="rounded-xl bg-red-600 hover:bg-red-700 w-full sm:w-auto">End Room</Button>
+                  )}
+                </div>
               </div>
             </div>
           </div>

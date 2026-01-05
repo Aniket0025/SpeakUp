@@ -94,4 +94,104 @@ router.get("/rooms/:roomId", authenticate, async (req, res) => {
     }
 });
 
+router.post("/global/join", authenticate, async (req, res) => {
+    try {
+        const uid = req.user._id;
+
+        // If user is already in a waiting global room, return it
+        const existing = await GdRoom.findOne({
+            mode: "global",
+            status: "waiting",
+            participants: { $elemMatch: { user: uid } },
+        }).select("roomId");
+        if (existing) return res.status(200).json({ roomId: existing.roomId });
+
+        // Find an available waiting room with < 6 participants
+        // participants.5 exists means 6th element exists => room is full
+        const available = await GdRoom.findOne({
+            mode: "global",
+            status: "waiting",
+            participants: { $not: { $elemMatch: { user: uid } } },
+            "participants.5": { $exists: false },
+        })
+            .sort({ createdAt: 1 })
+            .select("roomId maxParticipants");
+
+        if (available) {
+            await GdRoom.updateOne(
+                { roomId: available.roomId, participants: { $not: { $elemMatch: { user: uid } } } },
+                {
+                    $push: {
+                        participants: { user: uid, name: req.user.fullName, joinedAt: new Date(), lastSeenAt: new Date() },
+                    },
+                }
+            );
+            return res.status(200).json({ roomId: available.roomId });
+        }
+
+        // Create new global waiting room
+        let roomId = pickRoomId();
+        for (let i = 0; i < 5; i++) {
+            // eslint-disable-next-line no-await-in-loop
+            const exists = await GdRoom.exists({ roomId });
+            if (!exists) break;
+            roomId = pickRoomId();
+        }
+
+        const doc = await GdRoom.create({
+            roomId,
+            roomName: "Global Match",
+            topic: "Global Discussion",
+            mode: "global",
+            maxParticipants: 6,
+            durationSeconds: 10 * 60,
+            countdownSeconds: 10,
+            hostUserId: uid,
+            status: "waiting",
+            participants: [
+                {
+                    user: uid,
+                    name: req.user.fullName,
+                    joinedAt: new Date(),
+                    lastSeenAt: new Date(),
+                },
+            ],
+        });
+
+        return res.status(201).json({ roomId: doc.roomId });
+    } catch (err) {
+        return res.status(500).json({ message: err?.message || "Failed to join global match" });
+    }
+});
+
+router.get("/rooms", authenticate, async (req, res) => {
+    try {
+        const status = String(req.query.status || "waiting").trim();
+        const mode = String(req.query.mode || "custom").trim();
+        const filter = {};
+        if (status) filter.status = status;
+        if (mode) filter.mode = mode;
+
+        const rooms = await GdRoom.find(filter)
+            .select("roomId roomName topic maxParticipants status participants hostUserId createdAt")
+            .populate({ path: "hostUserId", select: "fullName" })
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const data = rooms.map((r) => ({
+            roomId: r.roomId,
+            roomName: r.roomName,
+            topic: r.topic,
+            maxParticipants: r.maxParticipants,
+            status: r.status,
+            participantsCount: Array.isArray(r.participants) ? r.participants.length : 0,
+            hostName: r.hostUserId && typeof r.hostUserId === "object" ? r.hostUserId.fullName : null,
+        }));
+
+        return res.status(200).json({ rooms: data });
+    } catch (err) {
+        return res.status(500).json({ message: err?.message || "Failed to list rooms" });
+    }
+});
+
 export default router;
