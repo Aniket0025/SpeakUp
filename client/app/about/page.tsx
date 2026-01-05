@@ -5,7 +5,7 @@ import { Sparkles, Users, Target, Mic, MessageSquare, Shield } from "lucide-reac
 
 export default function AboutPage() {
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
       <main className="max-w-5xl mx-auto px-6 md:px-12 py-12">
         <div className="mb-12">

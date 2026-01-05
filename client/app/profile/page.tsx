@@ -17,13 +17,11 @@ import {
   UserMinus,
   MessageSquare,
 } from "lucide-react"
+import { useAuth } from "@/hooks/use-auth"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Input } from "@/components/ui/input"
 
-const user = {
-  name: "Aniket Yadav",
-  email: "aniketyadav25012005@gmail.com",
-  role: "Admin",
+const profileStats = {
   level: 1,
   xp: 0,
   nextLevelXp: 100,
@@ -62,14 +60,17 @@ const recentActivities = [
 ]
 
 export default function ProfilePage() {
+  const { user: authUser, logout } = useAuth()
+  const firstName = authUser?.fullName?.split(" ")[0] || "User"
+  const avatarInitial = authUser?.fullName?.[0] || "A"
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-4xl">
         {/* Profile Card */}
-        <div className="rounded-[40px] bg-white border border-gray-100 shadow-xl p-10 mb-8 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-32 h-32 bg-indigo-50 rounded-full -mr-16 -mt-16 opacity-50" />
+        <div className="rounded-[40px] bg-card border border-border shadow-xl p-10 mb-8 relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-muted rounded-full -mr-16 -mt-16 opacity-50" />
           <div className="flex flex-col md:flex-row items-start md:items-center gap-8 relative">
             {/* Avatar */}
             <div className="relative group">
@@ -77,10 +78,10 @@ export default function ProfilePage() {
               <Avatar className="h-32 w-32 rounded-[40px] border-4 border-white shadow-2xl relative">
                 <AvatarImage src="/male-avatar-v2.png" />
                 <AvatarFallback className="bg-gradient-to-br from-violet-500 to-indigo-600 text-white text-4xl font-black">
-                  A
+                  {avatarInitial}
                 </AvatarFallback>
               </Avatar>
-              <button className="absolute -bottom-2 -right-2 h-10 w-10 rounded-2xl bg-white shadow-lg border border-gray-100 flex items-center justify-center hover:bg-gray-50 transition-colors">
+              <button className="absolute -bottom-2 -right-2 h-10 w-10 rounded-2xl bg-card shadow-lg border border-border flex items-center justify-center hover:bg-muted transition-colors">
                 <Pencil className="h-5 w-5 text-indigo-500" />
               </button>
             </div>
@@ -88,25 +89,25 @@ export default function ProfilePage() {
             {/* Info */}
             <div className="flex-1">
               <div className="flex items-center gap-3 mb-2">
-                <h1 className="text-3xl font-black text-gray-900 leading-tight">Aniket</h1>
-                <button className="h-8 w-8 rounded-lg bg-indigo-50 flex items-center justify-center text-indigo-500 hover:bg-indigo-100 transition-colors">
+                <h1 className="text-3xl font-black text-foreground leading-tight">{firstName}</h1>
+                <button className="h-8 w-8 rounded-lg bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-indigo-500 hover:bg-indigo-100 dark:hover:bg-indigo-900 transition-colors">
                   <Pencil className="h-4 w-4" />
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 text-gray-500 mb-4 font-medium">
+              <div className="flex items-center gap-2 text-muted-foreground mb-4 font-medium">
                 <Mail className="h-4 w-4" />
-                <span>aniketyadav25012005@gmail.com</span>
+                <span>{authUser?.email}</span>
               </div>
 
               <div className="flex flex-wrap gap-2 mb-6">
                 <span className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-xl bg-amber-400 text-white text-xs font-black uppercase tracking-wider shadow-lg shadow-amber-400/20">
                   <Crown className="h-4 w-4 fill-white" />
-                  Level 1 • 0 XP
+                  Level {profileStats.level} • {profileStats.xp} XP
                 </span>
               </div>
 
-              <div className="w-full max-w-md h-4 bg-gray-100 rounded-full overflow-hidden shadow-inner">
+              <div className="w-full max-w-md h-4 bg-muted rounded-full overflow-hidden shadow-inner">
                 <div className="h-full bg-gradient-to-r from-orange-400 via-orange-500 to-amber-500 w-[5%] rounded-full shadow-lg" />
               </div>
             </div>
@@ -114,6 +115,7 @@ export default function ProfilePage() {
             <Button
               variant="destructive"
               className="rounded-2xl h-14 px-8 font-black text-lg shadow-xl shadow-red-500/20 active:scale-95 transition-transform"
+              onClick={() => logout()}
             >
               <LogOut className="h-5 w-5 mr-2" />
               Logout
@@ -123,43 +125,37 @@ export default function ProfilePage() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <StatCard
-            icon={Flame}
-            iconColor="text-orange-600"
-            iconBgColor="bg-orange-100"
-            label="Streak"
-            value={user.streak}
-          />
+          <StatCard icon={Flame} iconColor="text-orange-600" iconBgColor="bg-orange-100" label="Streak" value={profileStats.streak} />
           <StatCard
             icon={Users}
             iconColor="text-blue-600"
             iconBgColor="bg-blue-100"
             label="GD Sessions"
-            value={user.gdSessions}
+            value={profileStats.gdSessions}
           />
           <StatCard
             icon={Award}
             iconColor="text-amber-600"
             iconBgColor="bg-amber-100"
             label="Extempore"
-            value={user.extempore}
+            value={profileStats.extempore}
           />
           <StatCard
             icon={TrendingUp}
             iconColor="text-emerald-600"
             iconBgColor="bg-emerald-100"
             label="Avg Rating"
-            value={user.avgRating}
+            value={profileStats.avgRating}
           />
         </div>
 
         {/* Friends Management */}
-        <div className="rounded-[40px] bg-white border border-gray-100 shadow-xl p-10 mb-8">
-          <h2 className="text-2xl font-black text-gray-900 mb-8">Friends Management</h2>
+        <div className="rounded-[40px] bg-card border border-border shadow-xl p-10 mb-8">
+          <h2 className="text-2xl font-black text-foreground mb-8">Friends Management</h2>
 
           <Tabs defaultValue="friends" className="w-full">
             <div className="flex items-center justify-between mb-8">
-              <TabsList className="bg-gray-100 p-1.5 rounded-2xl h-auto">
+              <TabsList className="bg-muted p-1.5 rounded-2xl h-auto">
                 <TabsTrigger
                   value="friends"
                   className="rounded-xl px-6 py-2.5 font-bold data-[state=active]:bg-indigo-600 data-[state=active]:text-white"
@@ -177,30 +173,30 @@ export default function ProfilePage() {
 
             <TabsContent value="friends">
               <div className="relative mb-8">
-                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400" />
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
                 <Input
                   placeholder="Search by name or email"
-                  className="pl-12 h-14 rounded-2xl bg-gray-50 border-gray-100 focus:bg-white transition-all text-base font-medium"
+                  className="pl-12 h-14 rounded-2xl bg-muted border-border focus:bg-card transition-all text-base font-medium"
                 />
                 <Button className="absolute right-2 top-2 h-10 rounded-xl bg-indigo-600 hover:bg-indigo-700 font-bold px-6">
                   Search
                 </Button>
               </div>
 
-              <h3 className="font-black text-gray-900 mb-4 ml-2">Your Friends</h3>
+              <h3 className="font-black text-foreground mb-4 ml-2">Your Friends</h3>
               <div className="space-y-4">
                 {friends.map((friend) => (
                   <div
                     key={friend.id}
-                    className="p-5 rounded-3xl bg-white border border-gray-50 shadow-sm flex items-center justify-between hover:shadow-md transition-shadow group"
+                    className="p-5 rounded-3xl bg-card border border-border shadow-sm flex items-center justify-between hover:shadow-md transition-shadow group"
                   >
                     <div className="flex items-center gap-4">
-                      <div className="h-14 w-14 rounded-2xl bg-gray-50 flex items-center justify-center border border-gray-100 shadow-inner group-hover:scale-105 transition-transform">
-                        <MessageSquare className="h-6 w-6 text-gray-400" />
+                      <div className="h-14 w-14 rounded-2xl bg-muted flex items-center justify-center border border-border shadow-inner group-hover:scale-105 transition-transform">
+                        <MessageSquare className="h-6 w-6 text-muted-foreground" />
                       </div>
                       <div>
-                        <p className="font-black text-gray-900 text-lg leading-tight">{friend.name}</p>
-                        <p className="text-sm text-gray-400 font-medium">{friend.email}</p>
+                        <p className="font-black text-foreground text-lg leading-tight">{friend.name}</p>
+                        <p className="text-sm text-muted-foreground font-medium">{friend.email}</p>
                       </div>
                     </div>
                     <Button
@@ -215,35 +211,35 @@ export default function ProfilePage() {
               </div>
             </TabsContent>
 
-            <TabsContent value="invitations" className="py-12 text-center text-gray-400 font-medium">
+            <TabsContent value="invitations" className="py-12 text-center text-muted-foreground font-medium">
               No pending invitations
             </TabsContent>
 
-            <TabsContent value="sent" className="py-12 text-center text-gray-400 font-medium">
+            <TabsContent value="sent" className="py-12 text-center text-muted-foreground font-medium">
               No sent requests
             </TabsContent>
           </Tabs>
         </div>
 
         {/* Recent Activity */}
-        <div className="rounded-[40px] bg-white border border-gray-100 shadow-xl p-10">
-          <h2 className="text-2xl font-black text-gray-900 mb-8">Recent Activity</h2>
+        <div className="rounded-[40px] bg-card border border-border shadow-xl p-10">
+          <h2 className="text-2xl font-black text-foreground mb-8">Recent Activity</h2>
 
           <div className="space-y-4">
             {recentActivities.map((activity) => (
               <div
                 key={activity.id}
-                className="flex items-center justify-between p-6 rounded-3xl hover:bg-gray-50 transition-colors group"
+                className="flex items-center justify-between p-6 rounded-3xl hover:bg-muted transition-colors group"
               >
                 <div className="flex flex-col gap-1">
-                  <h4 className="font-bold text-gray-900 leading-tight group-hover:text-indigo-600 transition-colors">
+                  <h4 className="font-bold text-foreground leading-tight group-hover:text-indigo-600 transition-colors">
                     {activity.title}
                   </h4>
-                  <p className="text-sm text-gray-500 font-medium uppercase tracking-wider text-[10px]">
+                  <p className="text-sm text-muted-foreground font-medium uppercase tracking-wider text-[10px]">
                     {activity.category}
                   </p>
                 </div>
-                <span className="text-xs text-gray-400 font-bold tabular-nums shrink-0">{activity.date}</span>
+                <span className="text-xs text-muted-foreground font-bold tabular-nums shrink-0">{activity.date}</span>
               </div>
             ))}
           </div>

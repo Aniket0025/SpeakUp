@@ -65,7 +65,7 @@ export default function LeaderboardPage() {
 
   if (!user) return null
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-4xl">
@@ -76,8 +76,8 @@ export default function LeaderboardPage() {
               <Trophy className="h-8 w-8 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3">Leaderboard</h1>
-          <p className="text-gray-500 text-lg">See how you rank against others</p>
+          <h1 className="text-4xl font-extrabold text-foreground mb-3">Leaderboard</h1>
+          <p className="text-muted-foreground text-lg">See how you rank against others</p>
         </div>
 
         {/* Podium */}
@@ -163,13 +163,13 @@ export default function LeaderboardPage() {
         </div>
 
         {/* Rankings List */}
-        <div className="rounded-3xl bg-white border border-gray-100 shadow-lg p-6">
+        <div className="rounded-3xl bg-card border border-border shadow-lg p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">
               <Trophy className="h-5 w-5 text-yellow-500" />
-              <h2 className="text-xl font-bold text-gray-900">All Rankings</h2>
+              <h2 className="text-xl font-bold text-foreground">All Rankings</h2>
             </div>
-            <div className="flex items-center gap-1 text-sm text-gray-500">
+            <div className="flex items-center gap-1 text-sm text-muted-foreground">
               <Users className="h-4 w-4" />
               {rankings.length} players
             </div>
@@ -182,8 +182,8 @@ export default function LeaderboardPage() {
                 className={cn(
                   "flex items-center gap-4 p-3 rounded-xl transition-all duration-200",
                   player.rank <= 3
-                    ? "bg-gradient-to-r from-yellow-50 to-orange-50 border border-yellow-200"
-                    : "hover:bg-gray-50",
+                    ? "bg-gradient-to-r from-yellow-50 to-orange-50 dark:from-yellow-900/20 dark:to-orange-900/20 border border-yellow-200 dark:border-yellow-900/40"
+                    : "hover:bg-muted",
                 )}
               >
                 {/* Rank */}
@@ -193,14 +193,14 @@ export default function LeaderboardPage() {
                     player.rank === 1 && "bg-yellow-400 text-white",
                     player.rank === 2 && "bg-gray-400 text-white",
                     player.rank === 3 && "bg-orange-400 text-white",
-                    player.rank > 3 && "bg-gray-100 text-gray-600",
+                    player.rank > 3 && "bg-muted text-muted-foreground",
                   )}
                 >
                   {player.rank}
                 </div>
 
                 {/* Avatar */}
-                <Avatar className="h-10 w-10 border-2 border-gray-100">
+                <Avatar className="h-10 w-10 border-2 border-border">
                   <AvatarFallback
                     className={cn(
                       "text-sm font-semibold",
@@ -215,8 +215,8 @@ export default function LeaderboardPage() {
 
                 {/* Info */}
                 <div className="flex-1">
-                  <p className="font-semibold text-gray-900">{player.name}</p>
-                  <div className="flex items-center gap-3 text-xs text-gray-500">
+                  <p className="font-semibold text-foreground">{player.name}</p>
+                  <div className="flex items-center gap-3 text-xs text-muted-foreground">
                     <span className="flex items-center gap-1">
                       <Sparkles className="h-3 w-3 text-violet-500" /> Lvl {player.level}
                     </span>
@@ -228,8 +228,8 @@ export default function LeaderboardPage() {
 
                 {/* XP */}
                 <div className="text-right">
-                  <p className="font-bold text-gray-900">{player.xp}</p>
-                  <p className="text-xs text-gray-500">XP</p>
+                  <p className="font-bold text-foreground">{player.xp}</p>
+                  <p className="text-xs text-muted-foreground">XP</p>
                 </div>
               </div>
             ))}

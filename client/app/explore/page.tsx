@@ -6,14 +6,14 @@ import { MessageSquare, Mic, Sparkles, Bot, Target, BookOpen } from "lucide-reac
 
 export default function ExplorePage() {
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-12">
         {/* Page Header */}
         <div className="text-center mb-16">
-          <h1 className="text-5xl font-extrabold text-gray-900 mb-4">Explore Learning Activities</h1>
-          <p className="text-gray-500 text-xl">Choose how you want to improve your communication skills</p>
+          <h1 className="text-5xl font-extrabold text-foreground mb-4">Explore Learning Activities</h1>
+          <p className="text-muted-foreground text-xl">Choose how you want to improve your communication skills</p>
         </div>
 
         {/* Activity Cards Grid */}

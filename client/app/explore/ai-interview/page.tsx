@@ -32,7 +32,7 @@ export default function AIInterviewPage() {
   ]
 
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
       <MatchingModal isOpen={!!matchingMode} onClose={() => setMatchingMode(null)} mode={matchingMode || ""} />
       <CustomRoomModal open={customRoomOpen} onOpenChange={setCustomRoomOpen} />

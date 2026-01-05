@@ -32,7 +32,7 @@ export default function DashboardPage() {
   }, [loading, user, router])
 
   if (!user) return null
-  const firstName = user?.fullName?.split(" ")[0] || "User"
+  const displayName = user?.fullName?.split(" ")[0] || "User"
   const quickActions = [
     {
       icon: Users,
@@ -65,20 +65,20 @@ export default function DashboardPage() {
   ]
 
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="max-w-7xl mx-auto px-6 md:px-12 py-12">
         {/* Welcome Section */}
         <div className="mb-12">
-          <h1 className="text-4xl md:text-5xl font-black text-gray-900 mb-3 tracking-tight">
+          <h1 className="text-4xl md:text-5xl font-black text-foreground mb-3 tracking-tight">
             Welcome back,{" "}
             <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
               {displayName}!
             </span>{" "}
             👋
           </h1>
-          <p className="text-gray-500 text-lg font-medium">Ready to level up your communication skills today?</p>
+          <p className="text-muted-foreground text-lg font-medium">Ready to level up your communication skills today?</p>
         </div>
 
         {/* Level Card */}
@@ -89,10 +89,10 @@ export default function DashboardPage() {
         {/* Quick Actions */}
         <div className="mb-14">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-black text-gray-900 tracking-tight">Quick Actions</h2>
+            <h2 className="text-2xl font-black text-foreground tracking-tight">Quick Actions</h2>
             <Link
               href="/explore"
-              className="text-violet-600 hover:text-violet-700 text-sm font-bold flex items-center gap-1 group"
+              className="text-violet-600 hover:text-violet-700 dark:text-violet-400 dark:hover:text-violet-300 text-sm font-bold flex items-center gap-1 group"
             >
               View All <ArrowRight className="h-4 w-4 group-hover:translate-x-1 transition-transform" />
             </Link>
@@ -103,17 +103,17 @@ export default function DashboardPage() {
               <Link
                 key={index}
                 href={action.href}
-                className="group relative overflow-hidden rounded-[32px] p-8 bg-white border border-gray-50 shadow-sm hover:shadow-2xl transition-all duration-500 hover:-translate-y-2"
+                className="group relative overflow-hidden rounded-[32px] p-8 bg-card border border-border shadow-sm hover:shadow-2xl transition-all duration-500 hover:-translate-y-2"
               >
                 <div
                   className={`h-12 w-12 rounded-xl bg-gradient-to-br ${action.gradient} flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300`}
                 >
                   <action.icon className="h-6 w-6 text-white" />
                 </div>
-                <h3 className="font-bold text-gray-900 mb-1 text-lg">{action.title}</h3>
-                <p className="text-sm text-gray-500 leading-relaxed">{action.description}</p>
+                <h3 className="font-bold text-foreground mb-1 text-lg">{action.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{action.description}</p>
                 <div className="absolute top-6 right-6 opacity-0 group-hover:opacity-100 transition-all transform scale-50 group-hover:scale-100 duration-300">
-                  <div className="h-8 w-8 rounded-full bg-violet-50 flex items-center justify-center">
+                  <div className="h-8 w-8 rounded-full bg-muted flex items-center justify-center">
                     <ArrowRight className="h-4 w-4 text-violet-600" />
                   </div>
                 </div>
@@ -124,7 +124,7 @@ export default function DashboardPage() {
 
         {/* Stats Grid */}
         <div className="mb-14">
-          <h2 className="text-2xl font-black text-gray-900 mb-6 tracking-tight">Your Stats</h2>
+          <h2 className="text-2xl font-black text-foreground mb-6 tracking-tight">Your Stats</h2>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
             <StatCard
               icon={MessageSquare}
@@ -153,23 +153,23 @@ export default function DashboardPage() {
 
         {/* Activity Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-14">
-          <div className="flex items-center gap-6 p-8 rounded-[32px] bg-white border border-gray-50 shadow-sm transition-all hover:shadow-md">
+          <div className="flex items-center gap-6 p-8 rounded-[32px] bg-card border border-border shadow-sm transition-all hover:shadow-md">
             <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-emerald-400 to-emerald-600 flex items-center justify-center shadow-lg shadow-emerald-500/20">
               <Calendar className="h-8 w-8 text-white" />
             </div>
             <div>
-              <p className="text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">This Week</p>
-              <p className="text-3xl font-black text-gray-900">0 Sessions</p>
+              <p className="text-sm text-muted-foreground font-bold uppercase tracking-wider mb-1">This Week</p>
+              <p className="text-3xl font-black text-foreground">0 Sessions</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-6 p-8 rounded-[32px] bg-white border border-gray-50 shadow-sm transition-all hover:shadow-md">
+          <div className="flex items-center gap-6 p-8 rounded-[32px] bg-card border border-border shadow-sm transition-all hover:shadow-md">
             <div className="h-16 w-16 rounded-2xl bg-gradient-to-br from-violet-400 to-violet-600 flex items-center justify-center shadow-lg shadow-violet-500/20">
               <TrendingUp className="h-8 w-8 text-white" />
             </div>
             <div>
-              <p className="text-sm text-gray-500 font-bold uppercase tracking-wider mb-1">This Month</p>
-              <p className="text-3xl font-black text-gray-900">0 Sessions</p>
+              <p className="text-sm text-muted-foreground font-bold uppercase tracking-wider mb-1">This Month</p>
+              <p className="text-3xl font-black text-foreground">0 Sessions</p>
             </div>
           </div>
         </div>

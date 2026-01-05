@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -8,6 +8,11 @@ import { Label } from "@/components/ui/label"
 import { useAuth } from "@/hooks/use-auth"
 import { ArrowLeft, Clock, Mic, MicOff, Play, Square, TrendingUp, Video, VideoOff, Zap } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { io, Socket } from "socket.io-client"
+
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
+// Disable sending transcript or session data to server when true -> no recording/saving
+const SEND_TO_SERVER = false
 
 const categories = [
   "Technology",
@@ -33,7 +38,7 @@ const suggestedTopics = {
 
 export default function ExtemporePage() {
   const router = useRouter()
-  const { user, loading } = useAuth()
+  const { user, loading, token } = useAuth()
   useEffect(() => {
     if (!loading && !user) {
       router.replace("/login")
@@ -48,7 +53,7 @@ export default function ExtemporePage() {
   const [isPracticing, setIsPracticing] = useState(false)
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [cameraOn, setCameraOn] = useState(true)
-  const [micOn, setMicOn] = useState(true)
+  const [micOn, setMicOn] = useState(false)
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [transcript, setTranscript] = useState("")
   const [interimTranscript, setInterimTranscript] = useState("")
@@ -63,7 +68,13 @@ export default function ExtemporePage() {
     videoRef.current = el
     if (el && mediaStreamRef.current) {
       ;(el as any).srcObject = mediaStreamRef.current
-      el.play().catch(() => {})
+      // play only after metadata to avoid flicker
+      const playSafe = () => el.play().catch(() => {})
+      if (el.readyState >= 1) {
+        playSafe()
+      } else {
+        el.onloadedmetadata = playSafe
+      }
     }
   }
 
@@ -73,7 +84,7 @@ export default function ExtemporePage() {
       alert("Please select a category and topic")
       return
     }
-    if (!token) {
+    if (SEND_TO_SERVER && !token) {
       alert("Please log in to start an extempore session")
       router.push("/login")
       return
@@ -84,40 +95,42 @@ export default function ExtemporePage() {
     setInterimTranscript("")
     setSessionId(null)
 
-    // Connect websocket
-    try {
-      const socket = io(API_BASE_URL, { auth: { token } })
-      socketRef.current = socket
+    // Connect websocket (optional)
+    if (SEND_TO_SERVER) {
+      try {
+        const socket = io(API_BASE_URL, { auth: { token } })
+        socketRef.current = socket
 
-      await new Promise<void>((resolve, reject) => {
-        socket.on("connect", () => resolve())
-        socket.on("connect_error", (err) => reject(err))
-      })
+        await new Promise<void>((resolve, reject) => {
+          socket.on("connect", () => resolve())
+          socket.on("connect_error", (err: any) => reject(err))
+        })
 
-      socket.emit(
-        "extempore:start",
-        { topic, category: selectedCategory, durationSeconds: timerMinutes * 60 },
-        (res: any) => {
-          if (!res?.ok) {
-            alert(res?.error || "Failed to start session")
-            socket.disconnect()
-            return
-          }
-          setSessionId(res.sessionId)
-        },
-      )
+        socket.emit(
+          "extempore:start",
+          { topic, category: selectedCategory, durationSeconds: timerMinutes * 60 },
+          (res: any) => {
+            if (!res?.ok) {
+              alert(res?.error || "Failed to start session")
+              socket.disconnect()
+              return
+            }
+            setSessionId(res.sessionId)
+          },
+        )
 
-      // Listen for server updates (optional UI sync)
-      socket.on("extempore:update", (data: { transcript: string }) => {
-        setTranscript(data.transcript)
-      })
-      socket.on("extempore:completed", (data: { transcript: string }) => {
-        setTranscript(data.transcript)
-      })
-    } catch (e) {
-      console.error("Socket connection failed", e)
-      alert("Could not connect to real-time service")
-      return
+        // Listen for server updates (optional UI sync)
+        socket.on("extempore:update", (data: { transcript: string }) => {
+          setTranscript(data.transcript)
+        })
+        socket.on("extempore:completed", (data: { transcript: string }) => {
+          setTranscript(data.transcript)
+        })
+      } catch (e) {
+        console.error("Socket connection failed", e)
+        alert("Could not connect to real-time service")
+        return
+      }
     }
 
     setTimeRemaining(timerMinutes * 60)
@@ -161,7 +174,7 @@ export default function ExtemporePage() {
     const used = timerMinutes * 60 - timeRemaining
     const finalText = [transcript, interimTranscript].filter(Boolean).join(" ")
 
-    if (socketRef.current && sessionId) {
+    if (SEND_TO_SERVER && socketRef.current && sessionId) {
       socketRef.current.emit(
         "extempore:stop",
         { sessionId, finalTranscript: finalText, durationSeconds: used },
@@ -171,7 +184,7 @@ export default function ExtemporePage() {
 
     cleanupMedia()
     stopRecognition()
-    if (socketRef.current) {
+    if (SEND_TO_SERVER && socketRef.current) {
       socketRef.current.disconnect()
       socketRef.current = null
     }
@@ -183,7 +196,7 @@ export default function ExtemporePage() {
   }
 
   const startRecognition = () => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) {
       alert("Speech recognition is not supported in this browser. Please use Chrome.")
       setMicOn(false)
@@ -210,7 +223,7 @@ export default function ExtemporePage() {
       if (finals.length) {
         const finalChunk = finals.join(" ")
         setTranscript((prev) => [prev, finalChunk].filter(Boolean).join(" "))
-        if (socketRef.current && sessionId) {
+        if (SEND_TO_SERVER && socketRef.current && sessionId) {
           socketRef.current.emit("extempore:chunk", { sessionId, text: finalChunk })
         }
       }
@@ -242,7 +255,7 @@ export default function ExtemporePage() {
 
   const cleanupMedia = () => {
     if (mediaStreamRef.current) {
-      mediaStreamRef.current.getTracks().forEach((t) => t.stop())
+      mediaStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
       mediaStreamRef.current = null
     }
     if (videoRef.current) {
@@ -296,7 +309,10 @@ export default function ExtemporePage() {
   useEffect(() => {
     if (isPracticing && cameraOn && mediaStreamRef.current && videoRef.current) {
       ;(videoRef.current as any).srcObject = mediaStreamRef.current
-      videoRef.current.play().catch(() => {})
+      const el = videoRef.current
+      const playSafe = () => el.play().catch(() => {})
+      if (el.readyState >= 1) playSafe()
+      else el.onloadedmetadata = playSafe
     }
   }, [isPracticing, cameraOn])
 
@@ -337,7 +353,15 @@ export default function ExtemporePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white rounded-3xl p-4 shadow border border-gray-100">
                 <div className="relative rounded-2xl overflow-hidden bg-black aspect-video">
-                  <video ref={setVideoRef} className="w-full h-full object-cover" muted playsInline autoPlay />
+                  <video
+                    ref={setVideoRef}
+                    className="w-full h-full object-cover"
+                    muted
+                    playsInline
+                    autoPlay
+                    onLoadedMetadata={(e) => (e.currentTarget as HTMLVideoElement).play().catch(() => {})}
+                    style={{ backfaceVisibility: "hidden", transform: "translateZ(0)", willChange: "transform" }}
+                  />
                   {!cameraOn && (
                     <div className="absolute inset-0 flex items-center justify-center text-white text-sm font-bold bg-black/60">
                       Camera Off
@@ -351,7 +375,7 @@ export default function ExtemporePage() {
                   {transcript}
                   {interimTranscript && <span className="opacity-60"> {interimTranscript}</span>}
                 </div>
-                <p className="mt-3 text-[11px] text-gray-400">Only your transcript is saved. Camera preview is not recorded.</p>
+                <p className="mt-3 text-[11px] text-gray-400">Nothing is recorded or uploaded. Camera is a local preview.</p>
               </div>
             </div>
 
@@ -385,7 +409,7 @@ export default function ExtemporePage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-8">

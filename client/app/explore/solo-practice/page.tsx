@@ -22,7 +22,7 @@ export default function SoloPracticePage() {
   if (!user) return null
 
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
       <MatchingModal isOpen={matchingActive} onClose={() => setMatchingActive(false)} mode="AI Practice Session" />
 

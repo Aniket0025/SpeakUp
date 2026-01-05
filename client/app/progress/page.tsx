@@ -51,7 +51,7 @@ export default function ProgressPage() {
 
   if (!user) return null
   return (
-    <div className="min-h-screen bg-[#f7f9fd]">
+    <div className="min-h-screen bg-background">
       <Header />
 
       <main className="container mx-auto px-4 py-8 max-w-5xl">
@@ -62,8 +62,8 @@ export default function ProgressPage() {
               <TrendingUp className="h-8 w-8 text-white" />
             </div>
           </div>
-          <h1 className="text-4xl font-extrabold text-gray-900 mb-3">My Progress</h1>
-          <p className="text-gray-500 text-lg">Track your improvement journey</p>
+          <h1 className="text-4xl font-extrabold text-foreground mb-3">My Progress</h1>
+          <p className="text-muted-foreground text-lg">Track your improvement journey</p>
         </div>
 
         {/* Level Card */}
@@ -99,45 +99,46 @@ export default function ProgressPage() {
 
         {/* Activity Cards */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-8">
-          <div className="flex items-center gap-4 p-6 rounded-2xl bg-white border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-4 p-6 rounded-2xl bg-card border border-border shadow-sm">
             <div className="h-14 w-14 rounded-xl bg-emerald-500 flex items-center justify-center">
               <Calendar className="h-7 w-7 text-white" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">This Week</p>
-              <p className="text-2xl font-bold text-gray-900">0 Sessions</p>
+              <p className="text-sm text-muted-foreground">This Week</p>
+              <p className="text-2xl font-bold text-foreground">0 Sessions</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-4 p-6 rounded-2xl bg-white border border-gray-100 shadow-sm">
+          <div className="flex items-center gap-4 p-6 rounded-2xl bg-card border border-border shadow-sm">
             <div className="h-14 w-14 rounded-xl bg-violet-500 flex items-center justify-center">
               <BarChart3 className="h-7 w-7 text-white" />
             </div>
             <div>
-              <p className="text-sm text-gray-500">This Month</p>
-              <p className="text-2xl font-bold text-gray-900">0 Sessions</p>
+              <p className="text-sm text-muted-foreground">This Month</p>
+              <p className="text-2xl font-bold text-foreground">0 Sessions</p>
             </div>
           </div>
         </div>
 
         {/* Performance Analytics */}
-        <h2 className="text-2xl font-bold text-gray-900 mb-4">Performance Analytics</h2>
+        <h2 className="text-2xl font-bold text-foreground mb-4">Performance Analytics</h2>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Weekly Performance Chart */}
-          <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-6">
-            <h3 className="font-bold text-gray-900 mb-4">Weekly Performance Trend</h3>
+          <div className="rounded-2xl bg-card border border-border shadow-sm p-6">
+            <h3 className="font-bold text-foreground mb-4">Weekly Performance Trend</h3>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={weeklyData}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="day" stroke="#94a3b8" fontSize={12} />
-                  <YAxis stroke="#94a3b8" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="day" stroke="var(--muted-foreground)" fontSize={12} />
+                  <YAxis stroke="var(--muted-foreground)" fontSize={12} />
                   <Tooltip
                     contentStyle={{
-                      backgroundColor: "#fff",
-                      border: "1px solid #e2e8f0",
+                      backgroundColor: "var(--popover)",
+                      border: "1px solid var(--border)",
                       borderRadius: "12px",
+                      color: "var(--popover-foreground)",
                     }}
                   />
                   <Line
@@ -154,14 +155,14 @@ export default function ProgressPage() {
           </div>
 
           {/* Skill Distribution Chart */}
-          <div className="rounded-2xl bg-white border border-gray-100 shadow-sm p-6">
-            <h3 className="font-bold text-gray-900 mb-4">Skill Distribution</h3>
+          <div className="rounded-2xl bg-card border border-border shadow-sm p-6">
+            <h3 className="font-bold text-foreground mb-4">Skill Distribution</h3>
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <RadarChart data={skillData}>
-                  <PolarGrid stroke="#e2e8f0" />
-                  <PolarAngleAxis dataKey="skill" stroke="#64748b" fontSize={12} />
-                  <PolarRadiusAxis stroke="#94a3b8" fontSize={10} />
+                  <PolarGrid stroke="var(--border)" />
+                  <PolarAngleAxis dataKey="skill" stroke="var(--muted-foreground)" fontSize={12} />
+                  <PolarRadiusAxis stroke="var(--muted-foreground)" fontSize={10} />
                   <Radar
                     name="Skills"
                     dataKey="value"
