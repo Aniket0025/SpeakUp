@@ -18,10 +18,21 @@ import {
     Zap,
 } from "lucide-react"
 import Link from "next/link"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
 
 export default function DashboardPage() {
-  const { user } = useAuth()
-  const displayName = user?.fullName || user?.email?.split("@")[0] || "User"
+  const { user, loading } = useAuth()
+  const router = useRouter()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/home")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
+  const firstName = user?.fullName?.split(" ")[0] || "User"
   const quickActions = [
     {
       icon: Users,

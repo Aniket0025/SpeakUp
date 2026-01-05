@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Trophy, Search, Plus, Users, Calendar, Globe, Building, Check, ArrowLeft } from "lucide-react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 
 const featuredTournament = {
   title: "National Group Discussion Championship 2025",
@@ -52,6 +53,15 @@ export default function TournamentsPage() {
   const [registrationOpen, setRegistrationOpen] = useState(false)
   const [selectedTournament, setSelectedTournament] = useState<(typeof tournaments)[0] | null>(null)
   const [registered, setRegistered] = useState(false)
+  const { user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   const handleRegister = (tournament: (typeof tournaments)[0] | null) => {
     setSelectedTournament(tournament)

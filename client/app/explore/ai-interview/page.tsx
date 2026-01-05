@@ -7,12 +7,22 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { MatchingModal } from "@/components/explore/matching-modal"
 import { CustomRoomModal } from "@/components/explore/custom-room-modal"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function AIInterviewPage() {
   const router = useRouter()
   const [matchingMode, setMatchingMode] = useState<string | null>(null)
   const [customRoomOpen, setCustomRoomOpen] = useState(false)
+  const { user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   const interviewTypes = [
     { name: "HR Interview", icon: Heart, color: "text-rose-500", bgColor: "bg-rose-50" },
@@ -25,7 +35,7 @@ export default function AIInterviewPage() {
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />
       <MatchingModal isOpen={!!matchingMode} onClose={() => setMatchingMode(null)} mode={matchingMode || ""} />
-      <CustomRoomModal open={customRoomOpen} onOpenChange={setCustomRoomOpen} title="Interview Practice Room" />
+      <CustomRoomModal open={customRoomOpen} onOpenChange={setCustomRoomOpen} />
 
       <main className="container mx-auto px-4 py-8">
         <Button

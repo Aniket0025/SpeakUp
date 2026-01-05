@@ -7,12 +7,22 @@ import { useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { MatchingModal } from "@/components/explore/matching-modal"
 import { CustomRoomModal } from "@/components/explore/custom-room-modal"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function DebatePage() {
   const router = useRouter()
   const [matchingMode, setMatchingMode] = useState<string | null>(null)
   const [customRoomOpen, setCustomRoomOpen] = useState(false)
+  const { user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   const debateModes = [
     {
@@ -56,7 +66,7 @@ export default function DebatePage() {
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />
       <MatchingModal isOpen={!!matchingMode} onClose={() => setMatchingMode(null)} mode={matchingMode || ""} />
-      <CustomRoomModal open={customRoomOpen} onOpenChange={setCustomRoomOpen} title="Custom Debate Room" />
+      <CustomRoomModal open={customRoomOpen} onOpenChange={setCustomRoomOpen} />
 
       <main className="container mx-auto px-4 py-8">
         <Button

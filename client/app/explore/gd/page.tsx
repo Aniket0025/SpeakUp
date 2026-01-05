@@ -1,16 +1,26 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Header } from "@/components/layout/header"
 import { ModeCard } from "@/components/ui/mode-card"
 import { CustomRoomModal } from "@/components/explore/custom-room-modal"
 import { Globe, Settings, Trophy, ArrowLeft } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function GDModePage() {
   const [customRoomOpen, setCustomRoomOpen] = useState(false)
   const router = useRouter()
+  const { user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   return (
     <div className="min-h-screen bg-[#f7f9fd]">

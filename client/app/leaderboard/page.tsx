@@ -4,6 +4,9 @@ import { Header } from "@/components/layout/header"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { Trophy, Sparkles, Flame, Users } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 
 const topThree = [
   {
@@ -52,6 +55,15 @@ const rankings = [
 ]
 
 export default function LeaderboardPage() {
+  const router = useRouter()
+  const { user, loading } = useAuth()
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />
