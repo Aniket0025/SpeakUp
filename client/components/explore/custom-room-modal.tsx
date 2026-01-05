@@ -9,7 +9,9 @@ import { ArrowLeft, ArrowRight, Check, Copy, Plus, Search, Users } from "lucide-
 import { useRouter } from "next/navigation"
 import { type FormEvent, useEffect, useState } from "react"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
+const API_BASE_URL =
+  process.env.NEXT_PUBLIC_API_BASE_URL ||
+  (typeof window !== "undefined" ? `${window.location.protocol}//${window.location.hostname}:5000` : "http://localhost:5000")
 
 interface CustomRoomModalProps {
   open: boolean
