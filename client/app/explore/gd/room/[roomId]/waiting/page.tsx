@@ -132,6 +132,17 @@ export default function GDWaitingPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, token])
 
+  // Single source of truth redirect: whenever room becomes active/completed, route accordingly.
+  useEffect(() => {
+    if (!room) return
+    if (room.status === "active") {
+      router.replace(`/explore/gd/room/${roomId}/meet`)
+    }
+    if (room.status === "completed") {
+      router.replace("/explore/gd")
+    }
+  }, [room, roomId, router])
+
   // Fallback polling (helps when Socket.IO is blocked on some networks/devices)
   useEffect(() => {
     if (!token || !roomId) return
@@ -143,20 +154,29 @@ export default function GDWaitingPage() {
           headers: { Authorization: `Bearer ${token}` },
         })
         const data = await res.json().catch(() => null)
-        if (!res.ok) return
+        if (!res.ok) {
+          const msg = data?.message || `Failed to fetch room (${res.status})`
+          setError(`${msg} (server: ${API_BASE_URL})`)
+          return
+        }
         if (stopped) return
 
-        const nextRoom = data?.room
+        const rawRoom = data?.room
+        const nextRoom = rawRoom
+          ? {
+              ...rawRoom,
+              // Normalize API response (Mongo) to match UI shape
+              participants: Array.isArray(rawRoom.participants)
+                ? rawRoom.participants.map((p: any) => ({ userId: String(p.user || p.userId || ""), name: String(p.name || "") }))
+                : [],
+            }
+          : null
         if (nextRoom) {
           setRoom(nextRoom)
-          if (nextRoom.status === "active") {
-            router.replace(`/explore/gd/room/${roomId}/meet`)
-          }
-          if (nextRoom.status === "completed") {
-            router.replace("/explore/gd")
-          }
         }
-      } catch {}
+      } catch {
+        setError(`Cannot reach server (${API_BASE_URL}). Check WiFi/LAN IP and Windows firewall for port 5000.`)
+      }
     }
 
     tick()
