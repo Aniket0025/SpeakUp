@@ -287,6 +287,32 @@ io.on("connection", (socket) => {
         }
     });
 
+    socket.on("gd:transcript:chunk", async (payload) => {
+        try {
+            const roomId = (payload?.roomId || socket.data.gdRoomId || "").toString().trim().toUpperCase();
+            const text = (payload?.text || "").toString().trim();
+            if (!roomId || !text) return;
+
+            // Only append transcript for existing GD rooms
+            const room = await GdRoom.findOne({ roomId }).select("_id");
+            if (!room) return;
+
+            await GdRoom.updateOne(
+                { roomId },
+                {
+                    $push: {
+                        transcript: {
+                            user: socket.user._id,
+                            name: socket.user.fullName,
+                            text,
+                            createdAt: new Date(),
+                        },
+                    },
+                }
+            );
+        } catch { }
+    });
+
     socket.on("gd:leave", (payload, cb) => {
         try {
             const roomId = (payload?.roomId || socket.data.gdRoomId || "").toString().trim().toUpperCase();

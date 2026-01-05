@@ -22,6 +22,15 @@ const gdRoomSchema = new mongoose.Schema(
         startedAt: { type: Date },
         endedAt: { type: Date },
         participants: { type: [gdParticipantSchema], default: [] },
+        // Per-utterance transcript entries captured during the GD session
+        transcript: [
+            {
+                user: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+                name: { type: String, required: true },
+                text: { type: String, required: true },
+                createdAt: { type: Date, default: Date.now },
+            },
+        ],
     },
     { timestamps: true }
 );
