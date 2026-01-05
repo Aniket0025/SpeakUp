@@ -4,9 +4,19 @@ import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, BookOpen, GraduationCap, Building2, Code } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function PrepGuidePage() {
   const router = useRouter()
+  const { user, loading } = useAuth()
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   return (
     <div className="min-h-screen bg-[#f7f9fd]">

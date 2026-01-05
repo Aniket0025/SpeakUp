@@ -3,6 +3,8 @@
 import { cn } from "@/lib/utils"
 import type { LucideIcon } from "lucide-react"
 import Link from "next/link"
+import { useAuth } from "@/hooks/use-auth"
+import { useRouter } from "next/navigation"
 
 interface ActivityCardProps {
   icon: LucideIcon
@@ -24,9 +26,19 @@ export function ActivityCard({
   href,
   subtitleColor = "text-violet-600",
 }: ActivityCardProps) {
+  const { user } = useAuth()
+  const router = useRouter()
+
+  const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (!user) {
+      e.preventDefault()
+      router.push("/login")
+    }
+  }
   return (
     <Link
       href={href}
+      onClick={handleClick}
       className="group relative flex flex-col items-start p-8 rounded-[2.5rem] bg-white border border-gray-100 shadow-[0_8px_30px_rgb(0,0,0,0.04)] hover:shadow-[0_20px_40px_rgb(0,0,0,0.08)] transition-all duration-500 hover:-translate-y-2 text-left w-full"
     >
       {/* Icon Container */}

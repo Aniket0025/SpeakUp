@@ -12,7 +12,13 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useState } from "react"
 
-const navItems = [
+const publicNav = [
+  { name: "Home", href: "/home" },
+  { name: "About", href: "/about" },
+  { name: "Explore", href: "/explore" },
+]
+
+const privateNav = [
   { name: "Dashboard", href: "/" },
   { name: "Explore", href: "/explore" },
   { name: "Progress", href: "/progress" },
@@ -49,7 +55,7 @@ export function Header() {
     <header className="sticky top-0 z-50 w-full border-b border-border/40 bg-white/80 backdrop-blur-xl">
       <div className="container mx-auto flex h-16 items-center justify-between px-4">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-2">
+        <Link href={user ? "/" : "/home"} className="flex items-center gap-2">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-orange-400 to-pink-500">
             <span className="text-xl">🎙️</span>
           </div>
@@ -60,7 +66,7 @@ export function Header() {
 
         {/* Desktop Navigation */}
         <nav className="hidden md:flex items-center gap-1">
-          {navItems.map((item) => (
+          {(user ? privateNav : publicNav).map((item) => (
             <Link
               key={item.name}
               href={item.href}
@@ -108,7 +114,10 @@ export function Header() {
                     </span>
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="end" className="w-80 p-0 rounded-3xl overflow-hidden shadow-2xl border-gray-100">
+                <PopoverContent
+                  align="end"
+                  className="sm:w-96 w-[calc(100vw-2rem)] max-w-[92vw] max-h-[70vh] p-0 rounded-3xl overflow-hidden shadow-2xl border-gray-100"
+                >
                   <div className="p-4 border-b border-gray-50 flex items-center justify-between bg-white">
                     <h3 className="font-bold text-gray-900">Notifications</h3>
                     <Button
@@ -119,7 +128,7 @@ export function Header() {
                       Mark all read
                     </Button>
                   </div>
-                  <ScrollArea className="h-80">
+                  <ScrollArea className="sm:h-80 max-h-[60vh]">
                     <div className="flex flex-col">
                       {notifications.map((n) => (
                         <div
@@ -137,7 +146,7 @@ export function Header() {
                               <p className="text-sm font-bold text-gray-900 truncate">{n.title}</p>
                               <span className="text-[10px] text-gray-400 font-medium shrink-0">{n.time}</span>
                             </div>
-                            <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed">{n.description}</p>
+                            <p className="text-xs text-gray-500 line-clamp-2 leading-relaxed break-words whitespace-normal">{n.description}</p>
                           </div>
                         </div>
                       ))}
@@ -165,13 +174,16 @@ export function Header() {
                     </span>
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent align="end" className="w-80 p-0 rounded-3xl overflow-hidden shadow-2xl border-gray-100">
+                <PopoverContent
+                  align="end"
+                  className="sm:w-96 w-[calc(100vw-2rem)] max-w-[92vw] max-h-[70vh] p-0 rounded-3xl overflow-hidden shadow-2xl border-gray-100"
+                >
                   {!activeChat ? (
                     <>
                       <div className="p-4 border-b border-gray-50 bg-white">
                         <h3 className="font-bold text-gray-900">Messages</h3>
                       </div>
-                      <ScrollArea className="h-80">
+                      <ScrollArea className="sm:h-80 max-h-[60vh]">
                         <div className="flex flex-col">
                           {friends.map((friend) => (
                             <button
@@ -193,7 +205,7 @@ export function Header() {
                                 <p className="text-sm font-bold text-gray-900 truncate group-hover:text-indigo-600 transition-colors">
                                   {friend.name}
                                 </p>
-                                <p className="text-xs text-gray-500 truncate mt-0.5">
+                                <p className="text-xs text-gray-500 truncate mt-0.5 break-words whitespace-normal">
                                   Hey, let's practice for the technical interview later!
                                 </p>
                               </div>
@@ -203,7 +215,7 @@ export function Header() {
                       </ScrollArea>
                     </>
                   ) : (
-                    <div className="flex flex-col h-[400px]">
+                    <div className="flex flex-col h-[60vh] sm:h-[400px]">
                       <div className="p-3 border-b border-gray-50 flex items-center gap-3 bg-white">
                         <Button
                           variant="ghost"
@@ -310,7 +322,7 @@ export function Header() {
       {mobileMenuOpen && (
         <div className="md:hidden border-t border-border/40 bg-white p-4">
           <nav className="flex flex-col gap-2">
-            {navItems.map((item) => (
+            {(user ? privateNav : publicNav).map((item) => (
               <Link
                 key={item.name}
                 href={item.href}

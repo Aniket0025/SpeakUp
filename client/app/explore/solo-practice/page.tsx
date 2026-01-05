@@ -5,11 +5,21 @@ import { Button } from "@/components/ui/button"
 import { ArrowLeft, Bot, Eye, Lightbulb, BarChart3 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { MatchingModal } from "@/components/explore/matching-modal"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function SoloPracticePage() {
   const router = useRouter()
   const [matchingActive, setMatchingActive] = useState(false)
+  const { user, loading } = useAuth()
+
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
 
   return (
     <div className="min-h-screen bg-[#f7f9fd]">

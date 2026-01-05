@@ -4,6 +4,9 @@ import { Header } from "@/components/layout/header"
 import { StatCard } from "@/components/ui/stat-card"
 import { LevelCard } from "@/components/ui/level-card"
 import { MessageSquare, Mic, Users, Target, Calendar, TrendingUp, BarChart3 } from "lucide-react"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 import {
   LineChart,
   Line,
@@ -38,6 +41,15 @@ const skillData = [
 ]
 
 export default function ProgressPage() {
+  const router = useRouter()
+  const { user, loading } = useAuth()
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />

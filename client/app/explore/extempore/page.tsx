@@ -1,12 +1,13 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ArrowLeft, Mic, Clock, TrendingUp, Zap, Play, Square } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 
 const categories = [
   "Technology",
@@ -32,6 +33,14 @@ const suggestedTopics = {
 
 export default function ExtemporePage() {
   const router = useRouter()
+  const { user, loading } = useAuth()
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
   const [selectedCategory, setSelectedCategory] = useState("")
   const [customTopic, setCustomTopic] = useState("")
   const [selectedTopic, setSelectedTopic] = useState("")

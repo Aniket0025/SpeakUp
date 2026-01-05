@@ -4,8 +4,20 @@ import { Header } from "@/components/layout/header"
 import { Button } from "@/components/ui/button"
 import { ArrowLeft, Globe, Users, Clock, Sparkles } from "lucide-react"
 import Link from "next/link"
+import { useEffect } from "react"
+import { useRouter } from "next/navigation"
+import { useAuth } from "@/hooks/use-auth"
 
 export default function GlobalMatchingPage() {
+  const router = useRouter()
+  const { user, loading } = useAuth()
+  useEffect(() => {
+    if (!loading && !user) {
+      router.replace("/login")
+    }
+  }, [loading, user, router])
+
+  if (!user) return null
   return (
     <div className="min-h-screen bg-[#f7f9fd]">
       <Header />
