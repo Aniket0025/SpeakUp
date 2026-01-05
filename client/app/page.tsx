@@ -21,7 +21,7 @@ import Link from "next/link"
 
 export default function DashboardPage() {
   const { user } = useAuth()
-  const firstName = user?.fullName?.split(" ")[0] || "User"
+  const displayName = user?.fullName || user?.email?.split("@")[0] || "User"
   const quickActions = [
     {
       icon: Users,
@@ -63,7 +63,7 @@ export default function DashboardPage() {
           <h1 className="text-4xl md:text-5xl font-black text-gray-900 mb-3 tracking-tight">
             Welcome back,{" "}
             <span className="bg-gradient-to-r from-violet-600 to-indigo-600 bg-clip-text text-transparent">
-              {firstName}!
+              {displayName}!
             </span>{" "}
             👋
           </h1>

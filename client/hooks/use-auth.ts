@@ -13,25 +13,50 @@ type AuthUser = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:5000"
 
 export function useAuth() {
-  const [user, setUser] = useState<AuthUser | null>(null)
-  const [token, setToken] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [user, setUser] = useState<AuthUser | null>(() => {
+    if (typeof window === "undefined") return null
+    const storedUser = localStorage.getItem("speakup_user")
+    if (!storedUser) return null
+    try {
+      return JSON.parse(storedUser)
+    } catch {
+      localStorage.removeItem("speakup_user")
+      return null
+    }
+  })
+  const [token, setToken] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null
+    return localStorage.getItem("speakup_token")
+  })
+  const [loading, setLoading] = useState(false)
   const router = useRouter()
 
   useEffect(() => {
-    const storedUser = localStorage.getItem("speakup_user")
-    const storedToken = localStorage.getItem("speakup_token")
-    if (storedUser) {
-      try {
-        setUser(JSON.parse(storedUser))
-      } catch {
-        localStorage.removeItem("speakup_user")
+    const onStorage = (e: StorageEvent) => {
+      if (e.key === "speakup_user") {
+        if (e.newValue) {
+          try {
+            setUser(JSON.parse(e.newValue))
+          } catch {
+            setUser(null)
+          }
+        } else {
+          setUser(null)
+        }
+      }
+      if (e.key === "speakup_token") {
+        setToken(e.newValue)
       }
     }
-    if (storedToken) {
-      setToken(storedToken)
+
+    if (typeof window !== "undefined") {
+      window.addEventListener("storage", onStorage)
     }
-    setLoading(false)
+    return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("storage", onStorage)
+      }
+    }
   }, [])
 
   const login = async (credentials: { email: string; password: string }) => {
@@ -106,5 +131,16 @@ export function useAuth() {
     router.push("/login")
   }
 
-  return { user, token, login, register, logout, loading }
+  const updateUser = (updates: Partial<AuthUser>) => {
+    setUser((prev) => {
+      if (!prev) return prev
+      const next = { ...prev, ...updates }
+      try {
+        localStorage.setItem("speakup_user", JSON.stringify(next))
+      } catch {}
+      return next
+    })
+  }
+
+  return { user, token, login, register, logout, updateUser, loading }
 }
