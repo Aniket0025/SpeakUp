@@ -2,7 +2,7 @@
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/hooks/use-auth"
 import { Expand, LogOut, MessageSquareText } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
@@ -109,7 +109,7 @@ export default function GDMeetPage() {
         // Skip Zego's built-in pre-join name screen and enter the room directly
         showPreJoinView: false,
         onLeaveRoom: () => {
-          router.push("/")
+          leaveMeeting()
         },
       })
     } catch (e: any) {
@@ -126,7 +126,58 @@ export default function GDMeetPage() {
   }
 
   const leaveMeeting = () => {
-    router.push(`/explore/gd/room/${roomId}/waiting`)
+    try {
+      socketRef.current?.emit("gd:leave", { roomId }, () => {})
+    } catch {}
+    router.push("/explore/gd")
+  }
+
+  const endMeeting = () => {
+    if (!socketRef.current) return
+    socketRef.current.emit("gd:end", { roomId }, () => {
+      router.push("/explore/gd")
+    })
+  }
+
+  const startRecognition = () => {
+    try {
+      if (recognitionRef.current) return
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+      if (!SpeechRecognition) return
+
+      const rec = new SpeechRecognition()
+      rec.continuous = true
+      rec.interimResults = false
+      rec.lang = "en-US"
+
+      rec.onresult = (event: any) => {
+        try {
+          const last = event?.results?.[event.results.length - 1]
+          const text = String(last?.[0]?.transcript || "").trim()
+          if (!text) return
+          socketRef.current?.emit("gd:transcript:chunk", { roomId, text })
+        } catch {}
+      }
+
+      rec.onerror = () => {}
+
+      rec.onend = () => {
+        // Auto-restart if we are still in active state
+        try {
+          if (room?.status === "active") rec.start()
+        } catch {}
+      }
+
+      recognitionRef.current = rec
+      rec.start()
+    } catch {}
+  }
+
+  const stopRecognition = () => {
+    try {
+      recognitionRef.current?.stop?.()
+    } catch {}
+    recognitionRef.current = null
   }
 
   useEffect(() => {
@@ -198,6 +249,9 @@ export default function GDMeetPage() {
   useEffect(() => {
     if (!loading && room?.status === "active") {
       loadZego()
+      if (!recognitionRef.current) {
+        startRecognition()
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loading, room?.status])
@@ -243,6 +297,8 @@ export default function GDMeetPage() {
     }
   }
 
+  const isHost = Boolean(user && room && String(user.id) === String(room.hostUserId))
+
   return (
     <>
       <div ref={screenRef} className="fixed inset-0 bg-black">
@@ -267,35 +323,60 @@ export default function GDMeetPage() {
                   <p className="text-white/60 text-[10px] font-semibold mt-1">TIME LEFT</p>
                 </div>
 
-              <Button
-                variant="outline"
-                className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20"
-                onClick={enterFullscreen}
-                disabled={isFullscreen}
-              >
-                <Expand className="h-4 w-4 mr-2" />
-                Fullscreen
-              </Button>
-              <Button
-                className="rounded-xl bg-red-600 hover:bg-red-700"
-                onClick={leaveMeeting}
-              >
-                <LogOut className="h-4 w-4 mr-2" />
-                Leave
-              </Button>
+                <Button
+                  variant="outline"
+                  className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  onClick={enterFullscreen}
+                  disabled={isFullscreen}
+                >
+                  <Expand className="h-4 w-4 mr-2" />
+                  Fullscreen
+                </Button>
+
+                <Button
+                  variant="outline"
+                  className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  onClick={async () => {
+                    setIsTranscriptsOpen(true)
+                    await loadTranscripts()
+                  }}
+                  disabled={transcriptLoading}
+                >
+                  <MessageSquareText className="h-4 w-4 mr-2" />
+                  Transcripts
+                </Button>
+
+                {!isHost && (
+                  <Button className="rounded-xl bg-red-600 hover:bg-red-700" onClick={leaveMeeting}>
+                    <LogOut className="h-4 w-4 mr-2" />
+                    Leave
+                  </Button>
+                )}
+
+                {isHost && (
+                  <Button className="rounded-xl bg-red-700 hover:bg-red-800" onClick={endMeeting}>
+                    End Meeting
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
 
-            {error && (
-              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
-                {error}
-              </div>
-            )}
-          </div>
+          {error && (
+            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
+              {error}
+            </div>
+          )}
         </div>
       </div>
 
-      <Dialog open={isTranscriptsOpen} onOpenChange={setIsTranscriptsOpen}>
+      <Dialog
+        open={isTranscriptsOpen}
+        onOpenChange={(v) => {
+          setIsTranscriptsOpen(v)
+          if (v) loadTranscripts()
+        }}
+      >
         <DialogContent className="max-w-3xl">
           <DialogHeader>
             <DialogTitle>GD Transcripts</DialogTitle>

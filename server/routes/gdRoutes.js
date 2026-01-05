@@ -94,7 +94,6 @@ router.get("/rooms/:roomId", authenticate, async (req, res) => {
     }
 });
 
-<<<<<<< HEAD
 router.post("/global/join", authenticate, async (req, res) => {
     try {
         const uid = req.user._id;
@@ -192,7 +191,9 @@ router.get("/rooms", authenticate, async (req, res) => {
         return res.status(200).json({ rooms: data });
     } catch (err) {
         return res.status(500).json({ message: err?.message || "Failed to list rooms" });
-=======
+    }
+});
+
 router.get("/rooms/:roomId/transcript", authenticate, async (req, res) => {
     try {
         const roomId = String(req.params.roomId || "").trim().toUpperCase();
@@ -227,7 +228,6 @@ router.get("/rooms/:roomId/transcript", authenticate, async (req, res) => {
         });
     } catch (err) {
         return res.status(500).json({ message: err?.message || "Failed to fetch transcript" });
->>>>>>> 7456b36f3a349bf148e52d2732bc9dfddff7b651
     }
 });
 
