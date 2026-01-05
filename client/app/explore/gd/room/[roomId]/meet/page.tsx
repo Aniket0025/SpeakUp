@@ -1,8 +1,10 @@
 "use client"
 
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs"
 import { useAuth } from "@/hooks/use-auth"
-import { Expand, LogOut } from "lucide-react"
+import { Expand, LogOut, MessageSquareText } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { io, Socket } from "socket.io-client"
@@ -29,6 +31,19 @@ type ZegoTokenRes = {
   userName: string
 }
 
+type GdTranscriptEntry = {
+  userId: string
+  name: string
+  text: string
+  createdAt: string
+}
+
+type GdTranscriptPerUser = {
+  userId: string
+  name: string
+  entries: Array<{ text: string; createdAt: string }>
+}
+
 export default function GDMeetPage() {
   const params = useParams<{ roomId?: string }>()
   const roomId = useMemo(() => String(params?.roomId || "").trim().toUpperCase(), [params?.roomId])
@@ -39,12 +54,17 @@ export default function GDMeetPage() {
   const screenRef = useRef<HTMLDivElement | null>(null)
   const containerRef = useRef<HTMLDivElement | null>(null)
   const zegoRef = useRef<any>(null)
+  const recognitionRef = useRef<any>(null)
 
   const [room, setRoom] = useState<GdRoom | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isTranscriptsOpen, setIsTranscriptsOpen] = useState(false)
+  const [transcriptLoading, setTranscriptLoading] = useState(false)
+  const [combinedTranscript, setCombinedTranscript] = useState<GdTranscriptEntry[]>([])
+  const [perUserTranscript, setPerUserTranscript] = useState<GdTranscriptPerUser[]>([])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -80,11 +100,16 @@ export default function GDMeetPage() {
         sharedLinks: [
           {
             name: "Personal link",
-            url: `${window.location.protocol}//${window.location.host}/explore/gd/room/${roomId}/waiting`,
+            url: `${window.location.protocol}//${window.location.host}/explore/gd/room/${roomId}/meet`,
           },
         ],
         scenario: {
           mode: ZegoUIKitPrebuilt.GroupCall,
+        },
+        // Skip Zego's built-in pre-join name screen and enter the room directly
+        showPreJoinView: false,
+        onLeaveRoom: () => {
+          router.push("/")
         },
       })
     } catch (e: any) {
@@ -101,15 +126,7 @@ export default function GDMeetPage() {
   }
 
   const leaveMeeting = () => {
-    try { socketRef.current?.emit("gd:leave", { roomId }, () => {}) } catch {}
-    router.push("/explore/gd")
-  }
-
-  const endMeeting = () => {
-    if (!socketRef.current || !room || !user) return
-    socketRef.current.emit("gd:end", { roomId }, () => {
-      router.push("/explore/gd")
-    })
+    router.push(`/explore/gd/room/${roomId}/waiting`)
   }
 
   useEffect(() => {
@@ -130,6 +147,11 @@ export default function GDMeetPage() {
       setRoom(data)
       if (data.status === "waiting") {
         router.replace(`/explore/gd/room/${data.roomId}/waiting`)
+      } else if (data.status === "active" && !recognitionRef.current) {
+        // Room became active while connected – start local speech recognition for this user
+        try {
+          startRecognition()
+        } catch {}
       }
     })
 
@@ -149,6 +171,11 @@ export default function GDMeetPage() {
       }
       setRoom(res.room)
       setLoading(false)
+      if (res.room?.status === "active" && !recognitionRef.current) {
+        try {
+          startRecognition()
+        } catch {}
+      }
     })
 
     socket.emit("gd:get", { roomId }, (res: any) => {
@@ -163,6 +190,7 @@ export default function GDMeetPage() {
         socket.disconnect()
       } catch {}
       socketRef.current = null
+      stopRecognition()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [roomId, token])
@@ -188,31 +216,56 @@ export default function GDMeetPage() {
         zegoRef.current?.destroy?.()
       } catch {}
       zegoRef.current = null
+      stopRecognition()
     }
   }, [])
 
+  const loadTranscripts = async () => {
+    if (!token || !roomId) return
+    try {
+      setTranscriptLoading(true)
+      const res = await fetch(`${API_BASE_URL}/api/gd/rooms/${encodeURIComponent(roomId)}/transcript`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) {
+        setTranscriptLoading(false)
+        return
+      }
+      const data: {
+        entries: GdTranscriptEntry[]
+        perUser: GdTranscriptPerUser[]
+      } = await res.json()
+      setCombinedTranscript(data.entries || [])
+      setPerUserTranscript(data.perUser || [])
+      setTranscriptLoading(false)
+    } catch {
+      setTranscriptLoading(false)
+    }
+  }
+
   return (
-    <div ref={screenRef} className="fixed inset-0 bg-black">
-      <div className="absolute inset-0">
-        <div ref={containerRef} className="w-full h-full" />
-      </div>
+    <>
+      <div ref={screenRef} className="fixed inset-0 bg-black">
+        <div className="absolute inset-0">
+          <div ref={containerRef} className="w-full h-full" />
+        </div>
 
-      <div className="absolute top-0 left-0 right-0 z-50 p-4">
-        <div className="mx-auto max-w-5xl rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md shadow-lg px-4 py-3">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-white font-extrabold truncate">{room?.roomName || "GD Room"}</p>
-              <p className="text-white/70 text-xs truncate">
-                {roomId}
-                {room?.topic ? ` • ${room.topic}` : ""}
-              </p>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <div className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-center">
-                <p className="text-white text-2xl font-black leading-none">{formatTime(remainingSeconds)}</p>
-                <p className="text-white/60 text-[10px] font-semibold mt-1">TIME LEFT</p>
+        <div className="absolute top-0 left-0 right-0 z-50 p-4">
+          <div className="mx-auto max-w-5xl rounded-2xl border border-white/10 bg-black/40 backdrop-blur-md shadow-lg px-4 py-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-white font-extrabold truncate">{room?.roomName || "GD Room"}</p>
+                <p className="text-white/70 text-xs truncate">
+                  {roomId}
+                  {room?.topic ? ` • ${room.topic}` : ""}
+                </p>
               </div>
+
+              <div className="flex items-center gap-3">
+                <div className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-center">
+                  <p className="text-white text-2xl font-black leading-none">{formatTime(remainingSeconds)}</p>
+                  <p className="text-white/60 text-[10px] font-semibold mt-1">TIME LEFT</p>
+                </div>
 
               <Button
                 variant="outline"
@@ -223,33 +276,78 @@ export default function GDMeetPage() {
                 <Expand className="h-4 w-4 mr-2" />
                 Fullscreen
               </Button>
-              {!(user && room && String(user.id) === String(room.hostUserId)) && (
-                <Button
-                  className="rounded-xl bg-red-600 hover:bg-red-700"
-                  onClick={leaveMeeting}
-                >
-                  <LogOut className="h-4 w-4 mr-2" />
-                  Leave
-                </Button>
-              )}
-              {user && room && String(user.id) === String(room.hostUserId) && (
-                <Button
-                  className="rounded-xl bg-red-700 hover:bg-red-800"
-                  onClick={endMeeting}
-                >
-                  End Room
-                </Button>
-              )}
+              <Button
+                className="rounded-xl bg-red-600 hover:bg-red-700"
+                onClick={leaveMeeting}
+              >
+                <LogOut className="h-4 w-4 mr-2" />
+                Leave
+              </Button>
             </div>
           </div>
 
-          {error && (
-            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
-              {error}
-            </div>
-          )}
+            {error && (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
+                {error}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </div>
+
+      <Dialog open={isTranscriptsOpen} onOpenChange={setIsTranscriptsOpen}>
+        <DialogContent className="max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>GD Transcripts</DialogTitle>
+          </DialogHeader>
+          {transcriptLoading ? (
+            <p className="text-sm text-muted-foreground">Loading transcripts...</p>
+          ) : !combinedTranscript.length ? (
+            <p className="text-sm text-muted-foreground">No transcript captured yet for this room.</p>
+          ) : (
+            <Tabs defaultValue="combined" className="mt-4">
+              <TabsList className="grid grid-cols-2 w-full">
+                <TabsTrigger value="combined">Combined conversation</TabsTrigger>
+                <TabsTrigger value="per-user">By participant</TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="combined" className="mt-4 max-h-80 overflow-y-auto rounded-lg border bg-muted/40 p-3 text-sm space-y-2">
+                {combinedTranscript.map((entry, idx) => (
+                  <div key={`${entry.createdAt}-${idx}`} className="flex gap-2">
+                    <span className="font-semibold text-foreground min-w-[120px] truncate">{entry.name}:</span>
+                    <span className="text-muted-foreground break-words">{entry.text}</span>
+                  </div>
+                ))}
+              </TabsContent>
+
+              <TabsContent value="per-user" className="mt-4 max-h-80 overflow-y-auto">
+                {!perUserTranscript.length ? (
+                  <p className="text-sm text-muted-foreground">No participant transcripts available.</p>
+                ) : (
+                  <div className="space-y-4">
+                    {perUserTranscript.map((user) => (
+                      <div key={user.userId} className="rounded-lg border bg-muted/40 p-3">
+                        <p className="font-semibold text-foreground mb-2">{user.name}</p>
+                        {user.entries.length ? (
+                          <ul className="space-y-1 text-sm text-muted-foreground">
+                            {user.entries.map((e, idx) => (
+                              <li key={`${e.createdAt}-${idx}`} className="break-words">
+                                {e.text}
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          <p className="text-sm text-muted-foreground">No transcript for this participant.</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </TabsContent>
+            </Tabs>
+          )}
+        </DialogContent>
+      </Dialog>
+    </>
   )
 }

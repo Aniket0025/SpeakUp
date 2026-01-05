@@ -94,6 +94,7 @@ router.get("/rooms/:roomId", authenticate, async (req, res) => {
     }
 });
 
+<<<<<<< HEAD
 router.post("/global/join", authenticate, async (req, res) => {
     try {
         const uid = req.user._id;
@@ -191,6 +192,42 @@ router.get("/rooms", authenticate, async (req, res) => {
         return res.status(200).json({ rooms: data });
     } catch (err) {
         return res.status(500).json({ message: err?.message || "Failed to list rooms" });
+=======
+router.get("/rooms/:roomId/transcript", authenticate, async (req, res) => {
+    try {
+        const roomId = String(req.params.roomId || "").trim().toUpperCase();
+        const room = await GdRoom.findOne({ roomId }).select("roomId roomName topic transcript").lean();
+        if (!room) return res.status(404).json({ message: "Room not found" });
+
+        const entries = (room.transcript || []).map((e) => ({
+            userId: String(e.user),
+            name: e.name,
+            text: e.text,
+            createdAt: e.createdAt,
+        }));
+
+        // Ensure chronological order
+        entries.sort((a, b) => new Date(a.createdAt) - new Date(b.createdAt));
+
+        const perUserMap = new Map();
+        for (const e of entries) {
+            const key = e.userId;
+            if (!perUserMap.has(key)) {
+                perUserMap.set(key, { userId: e.userId, name: e.name, entries: [] });
+            }
+            perUserMap.get(key).entries.push({ text: e.text, createdAt: e.createdAt });
+        }
+
+        return res.status(200).json({
+            roomId: room.roomId,
+            roomName: room.roomName,
+            topic: room.topic,
+            entries,
+            perUser: Array.from(perUserMap.values()),
+        });
+    } catch (err) {
+        return res.status(500).json({ message: err?.message || "Failed to fetch transcript" });
+>>>>>>> 7456b36f3a349bf148e52d2732bc9dfddff7b651
     }
 });
 
