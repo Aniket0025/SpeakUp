@@ -1,7 +1,7 @@
-import type React from "react"
-import type { Metadata } from "next"
-import { Poppins, Inter } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
+import type { Metadata } from "next"
+import { Inter, Poppins } from "next/font/google"
+import type React from "react"
 import "./globals.css"
 
 const poppins = Poppins({
