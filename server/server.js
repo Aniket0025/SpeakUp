@@ -558,19 +558,32 @@ io.on("connection", (socket) => {
             const room = await GdRoom.findOne({ roomId }).select("_id");
             if (!room) return;
 
+            const entry = {
+                user: socket.user._id,
+                name: socket.user.fullName,
+                text,
+                createdAt: new Date(),
+            };
+
             await GdRoom.updateOne(
                 { roomId },
                 {
                     $push: {
-                        transcript: {
-                            user: socket.user._id,
-                            name: socket.user.fullName,
-                            text,
-                            createdAt: new Date(),
-                        },
+                        transcript: entry,
                     },
                 }
             );
+
+            // Realtime: broadcast chunk to everyone in the room (including sender)
+            try {
+                io.to(gdRoomSocketName(roomId)).emit("gd:transcript:chunk", {
+                    roomId,
+                    userId: String(socket.user._id),
+                    name: socket.user.fullName,
+                    text,
+                    createdAt: entry.createdAt,
+                });
+            } catch { }
         } catch { }
     });
 
