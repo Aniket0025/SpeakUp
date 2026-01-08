@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/hooks/use-auth"
-import { Expand, LogOut, MessageSquareText } from "lucide-react"
+import { Expand, LogOut, MessageSquareText, NotebookPen, Plus } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { io, Socket } from "socket.io-client"
@@ -66,9 +66,33 @@ export default function GDMeetPage() {
   const [loading, setLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isTranscriptsOpen, setIsTranscriptsOpen] = useState(false)
+  const [isNotesOpen, setIsNotesOpen] = useState(false)
   const [transcriptLoading, setTranscriptLoading] = useState(false)
   const [combinedTranscript, setCombinedTranscript] = useState<GdTranscriptEntry[]>([])
   const [perUserTranscript, setPerUserTranscript] = useState<GdTranscriptPerUser[]>([])
+
+  const notesDraftKey = useMemo(() => {
+    const uid = user?.id ? String(user.id) : "anon"
+    return `gd:notes:draft:${uid}:${roomId}`
+  }, [roomId, user?.id])
+
+  const [notesText, setNotesText] = useState("")
+  const [newNote, setNewNote] = useState("")
+
+  useEffect(() => {
+    try {
+      if (!roomId) return
+      const saved = window.localStorage.getItem(notesDraftKey)
+      if (saved !== null) setNotesText(saved)
+    } catch {}
+  }, [notesDraftKey, roomId])
+
+  useEffect(() => {
+    try {
+      if (!roomId) return
+      window.localStorage.setItem(notesDraftKey, notesText)
+    } catch {}
+  }, [notesDraftKey, notesText, roomId])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -146,7 +170,7 @@ export default function GDMeetPage() {
     if (!socketRef.current) return
     manualExitRef.current = true
     socketRef.current.emit("gd:end", { roomId }, () => {
-      router.push("/explore/gd")
+      router.push(`/explore/gd/room/${roomId}/analysis`)
     })
   }
 
@@ -217,6 +241,14 @@ export default function GDMeetPage() {
       if (data.status === "active") {
         hasBeenActiveRef.current = true
         setError(null)
+
+        // During the 1-minute preparation phase, startedAt can be null.
+        // Show full duration until the server starts the real timer broadcast.
+        if (!data.startedAt && typeof data.durationSeconds === "number") {
+          setRemainingSeconds(data.durationSeconds)
+          router.replace(`/explore/gd/room/${roomId}/prep`)
+          return
+        }
       }
       if (data.status === "waiting" && !hasBeenActiveRef.current) {
         setError("Waiting for host to start...")
@@ -226,6 +258,10 @@ export default function GDMeetPage() {
           startRecognition()
         } catch {}
       }
+
+      if (data.status === "completed") {
+        router.replace(`/explore/gd/room/${roomId}/analysis`)
+      }
     })
 
     socket.on("gd:timer", (data: { remainingSeconds: number }) => {
@@ -233,7 +269,7 @@ export default function GDMeetPage() {
     })
 
     socket.on("gd:ended", () => {
-      router.replace("/explore/gd")
+      router.replace(`/explore/gd/room/${roomId}/analysis`)
     })
 
     socket.emit("gd:join", { roomId }, (res: any) => {
@@ -244,6 +280,11 @@ export default function GDMeetPage() {
       }
       setRoom(res.room)
       setLoading(false)
+      if (res.room?.status === "active" && !res.room?.startedAt && typeof res.room?.durationSeconds === "number") {
+        setRemainingSeconds(res.room.durationSeconds)
+        router.replace(`/explore/gd/room/${roomId}/prep`)
+        return
+      }
       if (res.room?.status === "active" && !recognitionRef.current) {
         try {
           startRecognition()
@@ -302,7 +343,7 @@ export default function GDMeetPage() {
           setError(null)
         }
         if (status === "completed") {
-          router.replace("/explore/gd")
+          router.replace(`/explore/gd/room/${roomId}/analysis`)
         }
         if (status === "waiting" && !hasBeenActiveRef.current) {
           setError("Waiting for host to start...")
@@ -319,14 +360,14 @@ export default function GDMeetPage() {
   }, [roomId, token, router])
 
   useEffect(() => {
-    if (!loading && room?.status === "active") {
+    if (!loading && room?.status === "active" && room?.startedAt) {
       loadZego()
       if (!recognitionRef.current) {
         startRecognition()
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, room?.status])
+  }, [loading, room?.status, room?.startedAt])
 
   useEffect(() => {
     const onFsChange = () => {
@@ -418,6 +459,15 @@ export default function GDMeetPage() {
                   Transcripts
                 </Button>
 
+                <Button
+                  variant="outline"
+                  className="rounded-xl border-white/20 bg-white/10 text-white hover:bg-white/20"
+                  onClick={() => setIsNotesOpen(true)}
+                >
+                  <NotebookPen className="h-4 w-4 mr-2" />
+                  Notes
+                </Button>
+
                 {!isHost && (
                   <Button className="rounded-xl bg-red-600 hover:bg-red-700" onClick={leaveMeeting}>
                     <LogOut className="h-4 w-4 mr-2" />
@@ -499,6 +549,55 @@ export default function GDMeetPage() {
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isNotesOpen}
+        onOpenChange={(v) => {
+          setIsNotesOpen(v)
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Your Notes</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Add a quick note..."
+                className="flex-1 h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+              />
+              <Button
+                className="h-9"
+                onClick={() => {
+                  const t = newNote.trim()
+                  if (!t) return
+                  const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                  const entry = `• [${stamp}] ${t}`
+                  setNotesText((prev) => (prev.trim() ? `${prev.trim()}\n${entry}\n` : `${entry}\n`))
+                  setNewNote("")
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add
+              </Button>
+            </div>
+
+            <div className="rounded-lg border bg-muted/40 p-3">
+              <p className="text-xs font-semibold text-muted-foreground">Saved notes (only visible to you)</p>
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                placeholder="Write points you want to remember during the GD..."
+                className="mt-2 w-full min-h-64 rounded-md border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">Auto-saved on this device for this room.</p>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </>

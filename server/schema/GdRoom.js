@@ -18,6 +18,8 @@ const gdRoomSchema = new mongoose.Schema(
         mode: { type: String, enum: ["custom", "global"], default: "custom" },
         maxParticipants: { type: Number, default: 5 },
         durationSeconds: { type: Number, default: 600 },
+        prepStartedAt: { type: Date },
+        prepSeconds: { type: Number, default: 60 },
         countdownStartedAt: { type: Date },
         countdownSeconds: { type: Number, default: 10 },
         hostUserId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },

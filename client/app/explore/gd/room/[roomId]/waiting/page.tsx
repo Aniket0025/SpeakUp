@@ -78,7 +78,11 @@ export default function GDWaitingPage() {
         setCountdownRemaining(null)
       }
       if (data.status === "active") {
-        router.replace(`/explore/gd/room/${data.roomId}/meet`)
+        if (data.startedAt) {
+          router.replace(`/explore/gd/room/${data.roomId}/meet`)
+        } else {
+          router.replace(`/explore/gd/room/${data.roomId}/prep`)
+        }
       }
     })
 
@@ -87,7 +91,7 @@ export default function GDWaitingPage() {
     })
 
     socket.on("gd:started", (data: { roomId: string }) => {
-      router.replace(`/explore/gd/room/${data.roomId}/meet`)
+      router.replace(`/explore/gd/room/${data.roomId}/prep`)
     })
 
     socket.on("gd:countdown", (data: { remainingSeconds: number }) => {
@@ -95,7 +99,7 @@ export default function GDWaitingPage() {
     })
 
     socket.on("gd:ended", () => {
-      router.replace("/explore/gd")
+      router.replace(`/explore/gd/room/${roomId}/analysis`)
     })
 
     socket.emit("gd:join", { roomId }, (res: any) => {
@@ -105,7 +109,7 @@ export default function GDWaitingPage() {
       }
       setRoom(res.room)
       if (res?.room?.status === "active") {
-        router.replace(`/explore/gd/room/${roomId}/meet`)
+        router.replace(`/explore/gd/room/${roomId}/prep`)
       }
     })
 
@@ -114,7 +118,7 @@ export default function GDWaitingPage() {
         setRoom(res.room)
         setRemainingSeconds(res.remainingSeconds ?? 0)
         if (res?.room?.status === "active") {
-          router.replace(`/explore/gd/room/${roomId}/meet`)
+          router.replace(`/explore/gd/room/${roomId}/prep`)
         }
       }
     })
@@ -136,10 +140,14 @@ export default function GDWaitingPage() {
   useEffect(() => {
     if (!room) return
     if (room.status === "active") {
-      router.replace(`/explore/gd/room/${roomId}/meet`)
+      if (room.startedAt) {
+        router.replace(`/explore/gd/room/${roomId}/meet`)
+      } else {
+        router.replace(`/explore/gd/room/${roomId}/prep`)
+      }
     }
     if (room.status === "completed") {
-      router.replace("/explore/gd")
+      router.replace(`/explore/gd/room/${roomId}/analysis`)
     }
   }, [room, roomId, router])
 
@@ -216,7 +224,7 @@ export default function GDWaitingPage() {
     if (!isHost || !socketRef.current) return
     socketRef.current.emit("gd:end", { roomId }, (res: any) => {
       // Regardless of ack, route back; server will emit gd:ended to others
-      router.push("/explore/gd")
+      router.push(`/explore/gd/room/${roomId}/analysis`)
     })
   }
 
