@@ -6,20 +6,20 @@ import { LevelCard } from "@/components/ui/level-card"
 import { StatCard } from "@/components/ui/stat-card"
 import { useAuth } from "@/hooks/use-auth"
 import {
-    ArrowRight,
-    Calendar,
-    MessageSquare,
-    Mic,
-    Sparkles,
-    Target,
-    TrendingUp,
-    Trophy,
-    Users,
-    Zap,
+  ArrowRight,
+  Calendar,
+  MessageSquare,
+  Mic,
+  Sparkles,
+  Target,
+  TrendingUp,
+  Trophy,
+  Users,
+  Zap,
 } from "lucide-react"
 import Link from "next/link"
-import { useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { useEffect } from "react"
 
 export default function DashboardPage() {
   const { user, loading } = useAuth()
