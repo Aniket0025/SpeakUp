@@ -1,4 +1,4 @@
-cd # SpeakUp
+  # SpeakUp
 
 A full-stack app to practice communication skills with a modern UI. The project has a Next.js client and an Express + MongoDB backend. Authentication uses JWT, and all backend code lives strictly in the `server/` folder.
 
