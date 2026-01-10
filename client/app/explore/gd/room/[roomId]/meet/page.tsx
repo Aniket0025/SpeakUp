@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/hooks/use-auth"
-import { Expand, LogOut, MessageSquareText, NotebookPen, Plus } from "lucide-react"
+import { Circle, Expand, LogOut, MessageSquareText, Plus, Square } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { io, Socket } from "socket.io-client"
@@ -61,6 +61,15 @@ export default function GDMeetPage() {
   const hasBeenActiveRef = useRef(false)
   const manualExitRef = useRef(false)
 
+  const recordingDisplayStreamRef = useRef<MediaStream | null>(null)
+  const recordingMicStreamRef = useRef<MediaStream | null>(null)
+  const recordingStreamRef = useRef<MediaStream | null>(null)
+  const recordingAudioCtxRef = useRef<AudioContext | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const recordedChunksRef = useRef<BlobPart[]>([])
+  const recordingStopResolveRef = useRef<(() => void) | null>(null)
+  const recordingStopPromiseRef = useRef<Promise<void> | null>(null)
+
   const [room, setRoom] = useState<GdRoom | null>(null)
   const [remainingSeconds, setRemainingSeconds] = useState<number>(0)
   const [error, setError] = useState<string | null>(null)
@@ -74,6 +83,10 @@ export default function GDMeetPage() {
   const [transcriptCaptureOn, setTranscriptCaptureOn] = useState(true)
   const [transcriptCaptureError, setTranscriptCaptureError] = useState<string | null>(null)
   const [speechSupported, setSpeechSupported] = useState(true)
+
+  const [isRecording, setIsRecording] = useState(false)
+  const [recordingError, setRecordingError] = useState<string | null>(null)
+  const [isRecordingStopping, setIsRecordingStopping] = useState(false)
 
   const stopAllElementStreams = () => {
     try {
@@ -104,6 +117,232 @@ export default function GDMeetPage() {
     } catch {}
     zegoRef.current = null
     stopAllElementStreams()
+  }
+
+  const getBestRecorderMimeType = () => {
+    const candidates = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ]
+    try {
+      // eslint-disable-next-line no-restricted-globals
+      if (typeof MediaRecorder === "undefined") return null
+      for (const t of candidates) {
+        try {
+          if (MediaRecorder.isTypeSupported(t)) return t
+        } catch {}
+      }
+    } catch {}
+    return null
+  }
+
+  const cleanupRecordingStreams = () => {
+    try {
+      recordingStreamRef.current?.getTracks?.().forEach((t) => t.stop())
+    } catch {}
+    try {
+      recordingDisplayStreamRef.current?.getTracks?.().forEach((t) => t.stop())
+    } catch {}
+    try {
+      recordingMicStreamRef.current?.getTracks?.().forEach((t) => t.stop())
+    } catch {}
+
+    recordingStreamRef.current = null
+    recordingDisplayStreamRef.current = null
+    recordingMicStreamRef.current = null
+
+    try {
+      recordingAudioCtxRef.current?.close?.()
+    } catch {}
+    recordingAudioCtxRef.current = null
+  }
+
+  const downloadRecording = (blob: Blob) => {
+    try {
+      const stamp = new Date()
+      const safe = stamp.toISOString().replace(/[.:]/g, "-")
+      const fileName = `gd-${roomId || "room"}-${safe}.webm`
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = fileName
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      setTimeout(() => {
+        try {
+          URL.revokeObjectURL(url)
+        } catch {}
+      }, 2000)
+
+      try {
+        window.localStorage.setItem(
+          `gd:recording:last:${roomId}`,
+          JSON.stringify({ fileName, createdAt: Date.now(), size: blob.size, type: blob.type || "video/webm" })
+        )
+      } catch {}
+    } catch {}
+  }
+
+  const stopRecording = async () => {
+    if (!mediaRecorderRef.current) return
+    if (isRecordingStopping) return recordingStopPromiseRef.current || undefined
+
+    const rec = mediaRecorderRef.current
+    if (rec.state === "inactive") {
+      cleanupRecordingStreams()
+      mediaRecorderRef.current = null
+      return
+    }
+
+    setIsRecordingStopping(true)
+
+    if (!recordingStopPromiseRef.current) {
+      recordingStopPromiseRef.current = new Promise<void>((resolve) => {
+        recordingStopResolveRef.current = resolve
+      })
+    }
+
+    try {
+      rec.stop()
+    } catch {
+      try {
+        recordingStopResolveRef.current?.()
+      } catch {}
+    }
+
+    return recordingStopPromiseRef.current
+  }
+
+  const startRecording = async () => {
+    try {
+      if (isRecording || isRecordingStopping) return
+      setRecordingError(null)
+
+      // eslint-disable-next-line no-restricted-globals
+      if (typeof MediaRecorder === "undefined") {
+        setRecordingError("Recording is not supported in this browser.")
+        return
+      }
+
+      if (!navigator.mediaDevices?.getDisplayMedia) {
+        setRecordingError("Screen recording is not supported in this browser.")
+        return
+      }
+
+      recordedChunksRef.current = []
+
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: 30 },
+        audio: true,
+      })
+      recordingDisplayStreamRef.current = displayStream
+
+      const videoTrack = displayStream.getVideoTracks?.()[0]
+      if (!videoTrack) {
+        cleanupRecordingStreams()
+        setRecordingError("No video track found for recording.")
+        return
+      }
+
+      // Best-effort: also mix microphone audio so voices are captured clearly.
+      let micStream: MediaStream | null = null
+      try {
+        micStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+          video: false,
+        })
+        recordingMicStreamRef.current = micStream
+      } catch {
+        // Mic might be denied or already in use. We still proceed with display audio.
+        micStream = null
+      }
+
+      const audioCtx = new AudioContext()
+      recordingAudioCtxRef.current = audioCtx
+      const dest = audioCtx.createMediaStreamDestination()
+
+      const displayAudioTrack = displayStream.getAudioTracks?.()[0]
+      if (displayAudioTrack) {
+        try {
+          const src = audioCtx.createMediaStreamSource(new MediaStream([displayAudioTrack]))
+          src.connect(dest)
+        } catch {}
+      }
+
+      const micTrack = micStream?.getAudioTracks?.()[0]
+      if (micTrack) {
+        try {
+          const src = audioCtx.createMediaStreamSource(new MediaStream([micTrack]))
+          src.connect(dest)
+        } catch {}
+      }
+
+      try {
+        await audioCtx.resume()
+      } catch {}
+
+      const outAudioTracks = dest.stream.getAudioTracks?.() || []
+      const finalStream = new MediaStream([videoTrack, ...outAudioTracks])
+      recordingStreamRef.current = finalStream
+
+      const mimeType = getBestRecorderMimeType()
+      const recorder = mimeType ? new MediaRecorder(finalStream, { mimeType }) : new MediaRecorder(finalStream)
+      mediaRecorderRef.current = recorder
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) recordedChunksRef.current.push(e.data)
+      }
+
+      recorder.onstop = () => {
+        try {
+          const chunks = recordedChunksRef.current
+          recordedChunksRef.current = []
+          const type = mimeType || "video/webm"
+          const blob = new Blob(chunks, { type })
+          if (blob.size > 0) {
+            downloadRecording(blob)
+          }
+        } catch {}
+
+        cleanupRecordingStreams()
+        mediaRecorderRef.current = null
+
+        setIsRecording(false)
+        setIsRecordingStopping(false)
+
+        try {
+          recordingStopResolveRef.current?.()
+        } catch {}
+        recordingStopResolveRef.current = null
+        recordingStopPromiseRef.current = null
+      }
+
+      videoTrack.addEventListener("ended", () => {
+        // User stopped screen sharing from browser UI.
+        const p = stopRecording()
+        if (p) p.catch(() => {})
+      })
+
+      recorder.start(1000)
+      setIsRecording(true)
+    } catch (err: any) {
+      cleanupRecordingStreams()
+      mediaRecorderRef.current = null
+      setIsRecording(false)
+      setIsRecordingStopping(false)
+      const name = String(err?.name || "")
+      if (name === "NotAllowedError") setRecordingError("Recording permission denied.")
+      else if (name === "NotFoundError") setRecordingError("No capture device found.")
+      else setRecordingError(err?.message || "Failed to start recording.")
+    }
   }
 
   const notesDraftKey = useMemo(() => {
@@ -225,8 +464,11 @@ export default function GDMeetPage() {
     } catch {}
   }
 
-  const leaveMeeting = () => {
+  const leaveMeeting = async () => {
     manualExitRef.current = true
+    try {
+      await stopRecording()
+    } catch {}
     cleanupCall()
     try {
       socketRef.current?.emit("gd:leave", { roomId }, () => {})
@@ -234,9 +476,12 @@ export default function GDMeetPage() {
     router.push("/explore/gd")
   }
 
-  const endMeeting = () => {
+  const endMeeting = async () => {
     if (!socketRef.current) return
     manualExitRef.current = true
+    try {
+      await stopRecording()
+    } catch {}
     cleanupCall()
     socketRef.current.emit("gd:end", { roomId }, () => {
       router.push(`/explore/gd/room/${roomId}/analysis`)
@@ -544,6 +789,8 @@ export default function GDMeetPage() {
   useEffect(() => {
     return () => {
       try {
+        const p = stopRecording()
+        if (p) p.catch(() => {})
         cleanupCall()
       } catch {}
     }
@@ -621,6 +868,23 @@ export default function GDMeetPage() {
                   Transcripts
                 </Button>
 
+                {!isRecording ? (
+                  <Button
+                    variant="outline"
+                    className="rounded-xl border-red-500/40 bg-white/10 text-white hover:bg-white/20"
+                    onClick={startRecording}
+                    disabled={isRecordingStopping}
+                  >
+                    <Circle className="h-4 w-4 mr-2 fill-red-500 text-red-500" />
+                    Record
+                  </Button>
+                ) : (
+                  <Button className="rounded-xl bg-red-600 hover:bg-red-700" onClick={() => stopRecording()} disabled={isRecordingStopping}>
+                    <Square className="h-4 w-4 mr-2 fill-white text-white" />
+                    Stop
+                  </Button>
+                )}
+
                 {transcriptCaptureOn ? (
                   <Button className="rounded-xl bg-emerald-600 hover:bg-emerald-700" onClick={disableTranscriptCapture}>
                     Transcript On
@@ -656,6 +920,12 @@ export default function GDMeetPage() {
           {(transcriptCaptureError || !speechSupported) && (
             <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200">
               {speechSupported ? transcriptCaptureError : "Live transcript is not supported in this browser (use Chrome)."}
+            </div>
+          )}
+
+          {recordingError && (
+            <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
+              {recordingError}
             </div>
           )}
         </div>
