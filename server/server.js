@@ -54,6 +54,7 @@ const io = new SocketIOServer(server, {
 const gdRooms = new Map();
 const gdTimers = new Map();
 const gdCountdownTimers = new Map();
+const gdPrepTimers = new Map();
 const gdDisconnectCleanup = new Map();
 
 const gdRoomSocketName = (roomId) => `gd:${roomId}`;
@@ -74,6 +75,8 @@ const serializeRoom = (room) => {
         hostUserId: room.hostUserId,
         status: room.status,
         createdAt: room.createdAt,
+        prepStartedAt: room.prepStartedAt || null,
+        prepSeconds: room.prepSeconds || 60,
         startedAt: room.startedAt,
         durationSeconds: room.durationSeconds,
         countdownStartedAt: room.countdownStartedAt || null,
@@ -89,6 +92,13 @@ const remainingSeconds = (room) => {
     return Math.max(0, duration - elapsed);
 };
 
+const prepRemainingSeconds = (room) => {
+    const total = Number(room?.prepSeconds || 60);
+    if (!room?.prepStartedAt) return total;
+    const elapsed = Math.floor((Date.now() - room.prepStartedAt) / 1000);
+    return Math.max(0, total - elapsed);
+};
+
 const cleanupGdRoomIfEmpty = (roomId) => {
     const room = gdRooms.get(roomId);
     if (!room) return;
@@ -97,6 +107,11 @@ const cleanupGdRoomIfEmpty = (roomId) => {
     if (t) {
         clearInterval(t);
         gdTimers.delete(roomId);
+    }
+    const p = gdPrepTimers.get(roomId);
+    if (p) {
+        clearInterval(p);
+        gdPrepTimers.delete(roomId);
     }
     const c = gdCountdownTimers.get(roomId);
     if (c) {
@@ -147,6 +162,8 @@ const roomFromDb = (doc) => {
         hostUserId: doc.hostUserId ? String(doc.hostUserId) : null,
         status: doc.status,
         createdAt: doc.createdAt ? new Date(doc.createdAt).getTime() : Date.now(),
+        prepStartedAt: doc.prepStartedAt ? new Date(doc.prepStartedAt).getTime() : null,
+        prepSeconds: Number(doc.prepSeconds || 60),
         startedAt: doc.startedAt ? new Date(doc.startedAt).getTime() : null,
         durationSeconds: Number(doc.durationSeconds || 600),
         countdownStartedAt: doc.countdownStartedAt ? new Date(doc.countdownStartedAt).getTime() : null,
@@ -169,6 +186,8 @@ const hydrateGdRoom = async (roomId) => {
 const ensureTimerIfActive = (roomId, room) => {
     const id = String(roomId || "").trim().toUpperCase();
     if (!room || room.status !== "active") return;
+    // During preparation, startedAt is not set yet. Start the GD timer only after startedAt exists.
+    if (!room.startedAt) return;
     if (gdTimers.get(id)) return;
     const interval = setInterval(async () => {
         try {
@@ -191,6 +210,49 @@ const ensureTimerIfActive = (roomId, room) => {
         } catch { }
     }, 1000);
     gdTimers.set(id, interval);
+};
+
+const ensurePrepTimerIfActive = async (roomId, room) => {
+    const id = String(roomId || "").trim().toUpperCase();
+    if (!room || room.status !== "active") return;
+    if (room.startedAt) return;
+    if (!room.prepStartedAt) return;
+    if (gdPrepTimers.get(id)) return;
+
+    const tick = async () => {
+        const r = gdRooms.get(id);
+        if (!r) return;
+        if (r.status !== "active" || r.startedAt) {
+            const existing = gdPrepTimers.get(id);
+            if (existing) {
+                clearInterval(existing);
+                gdPrepTimers.delete(id);
+            }
+            return;
+        }
+
+        const rem = prepRemainingSeconds(r);
+        io.to(gdRoomSocketName(id)).emit("gd:prep", { roomId: id, remainingSeconds: rem });
+        if (rem <= 0) {
+            r.startedAt = Date.now();
+            await GdRoom.updateOne({ roomId: id }, { $set: { startedAt: new Date(r.startedAt) } });
+            io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(r));
+            const existing = gdPrepTimers.get(id);
+            if (existing) {
+                clearInterval(existing);
+                gdPrepTimers.delete(id);
+            }
+            ensureTimerIfActive(id, r);
+        }
+    };
+
+    await tick();
+    if (!gdPrepTimers.get(id)) {
+        const interval = setInterval(() => {
+            tick().catch(() => { });
+        }, 1000);
+        gdPrepTimers.set(id, interval);
+    }
 };
 
 const countdownRemaining = (room) => {
@@ -247,16 +309,21 @@ const ensureCountdownIfFull = async (roomId, room) => {
         if (rem <= 0) {
             await cancelCountdown(id, r);
             r.status = "active";
-            r.startedAt = Date.now();
-            await GdRoom.updateOne({ roomId: id }, { $set: { status: "active", startedAt: new Date(r.startedAt) } });
-            io.to(gdRoomSocketName(id)).emit("gd:started", { roomId: id, startedAt: r.startedAt, durationSeconds: r.durationSeconds });
+            r.prepStartedAt = Date.now();
+            r.prepSeconds = Number(r.prepSeconds || 60);
+            r.startedAt = null;
+            await GdRoom.updateOne(
+                { roomId: id },
+                { $set: { status: "active", prepStartedAt: new Date(r.prepStartedAt), prepSeconds: r.prepSeconds }, $unset: { startedAt: "" } }
+            );
+            io.to(gdRoomSocketName(id)).emit("gd:started", { roomId: id, startedAt: null, durationSeconds: r.durationSeconds });
             io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(r));
             const existingTimer = gdTimers.get(id);
             if (existingTimer) {
                 clearInterval(existingTimer);
                 gdTimers.delete(id);
             }
-            ensureTimerIfActive(id, r);
+            await ensurePrepTimerIfActive(id, r);
         }
     };
 
@@ -346,6 +413,8 @@ io.on("connection", (socket) => {
 
             const t = gdTimers.get(id);
             if (t) { clearInterval(t); gdTimers.delete(id); }
+            const p = gdPrepTimers.get(id);
+            if (p) { clearInterval(p); gdPrepTimers.delete(id); }
             const c = gdCountdownTimers.get(id);
             if (c) { clearInterval(c); gdCountdownTimers.delete(id); }
 
@@ -388,6 +457,7 @@ io.on("connection", (socket) => {
 
             io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(room));
             ensureTimerIfActive(id, room);
+            await ensurePrepTimerIfActive(id, room);
             await ensureCountdownIfFull(id, room);
             cb?.({ ok: true, room: serializeRoom(room) });
         } catch (err) {
@@ -402,6 +472,7 @@ io.on("connection", (socket) => {
             const room = (await hydrateGdRoom(id)) || gdRooms.get(id);
             if (!room) return cb?.({ ok: false, error: "Room not found" });
             ensureTimerIfActive(id, room);
+            await ensurePrepTimerIfActive(id, room);
             await ensureCountdownIfFull(id, room);
             cb?.({ ok: true, room: serializeRoom(room), remainingSeconds: remainingSeconds(room) });
         } catch (err) {
@@ -420,12 +491,17 @@ io.on("connection", (socket) => {
             if (room.status !== "waiting") return cb?.({ ok: false, error: "Room already started" });
 
             room.status = "active";
-            room.startedAt = Date.now();
-            await GdRoom.updateOne({ roomId: id }, { $set: { status: "active", startedAt: new Date(room.startedAt) } });
+            room.prepStartedAt = Date.now();
+            room.prepSeconds = Number(room.prepSeconds || 60);
+            room.startedAt = null;
+            await GdRoom.updateOne(
+                { roomId: id },
+                { $set: { status: "active", prepStartedAt: new Date(room.prepStartedAt), prepSeconds: room.prepSeconds }, $unset: { startedAt: "" } }
+            );
 
             io.to(gdRoomSocketName(id)).emit("gd:started", {
                 roomId: id,
-                startedAt: room.startedAt,
+                startedAt: null,
                 durationSeconds: room.durationSeconds,
             });
             io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(room));
@@ -437,10 +513,38 @@ io.on("connection", (socket) => {
                 gdTimers.delete(id);
             }
 
-            ensureTimerIfActive(id, room);
+            await ensurePrepTimerIfActive(id, room);
             cb?.({ ok: true, room: serializeRoom(room) });
         } catch (err) {
             cb?.({ ok: false, error: err.message || "Failed to start room" });
+        }
+    });
+
+    socket.on("gd:prep:skip", async (payload, cb) => {
+        try {
+            const { roomId } = payload || {};
+            const id = String(roomId || "").trim().toUpperCase();
+            const room = (await hydrateGdRoom(id)) || gdRooms.get(id);
+            if (!room) return cb?.({ ok: false, error: "Room not found" });
+            if (room.status !== "active") return cb?.({ ok: false, error: "Room is not active" });
+            if (String(room.hostUserId) !== String(socket.user._id)) return cb?.({ ok: false, error: "Only host can skip" });
+            if (room.startedAt) return cb?.({ ok: true });
+
+            room.startedAt = Date.now();
+            await GdRoom.updateOne({ roomId: id }, { $set: { startedAt: new Date(room.startedAt) } });
+
+            const p = gdPrepTimers.get(id);
+            if (p) {
+                clearInterval(p);
+                gdPrepTimers.delete(id);
+            }
+
+            io.to(gdRoomSocketName(id)).emit("gd:prep", { roomId: id, remainingSeconds: 0 });
+            io.to(gdRoomSocketName(id)).emit("gd:room", serializeRoom(room));
+            ensureTimerIfActive(id, room);
+            cb?.({ ok: true });
+        } catch (err) {
+            cb?.({ ok: false, error: err?.message || "Failed to skip preparation" });
         }
     });
 
@@ -454,19 +558,32 @@ io.on("connection", (socket) => {
             const room = await GdRoom.findOne({ roomId }).select("_id");
             if (!room) return;
 
+            const entry = {
+                user: socket.user._id,
+                name: socket.user.fullName,
+                text,
+                createdAt: new Date(),
+            };
+
             await GdRoom.updateOne(
                 { roomId },
                 {
                     $push: {
-                        transcript: {
-                            user: socket.user._id,
-                            name: socket.user.fullName,
-                            text,
-                            createdAt: new Date(),
-                        },
+                        transcript: entry,
                     },
                 }
             );
+
+            // Realtime: broadcast chunk to everyone in the room (including sender)
+            try {
+                io.to(gdRoomSocketName(roomId)).emit("gd:transcript:chunk", {
+                    roomId,
+                    userId: String(socket.user._id),
+                    name: socket.user.fullName,
+                    text,
+                    createdAt: entry.createdAt,
+                });
+            } catch { }
         } catch { }
     });
 

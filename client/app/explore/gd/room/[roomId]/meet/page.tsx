@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/hooks/use-auth"
-import { Expand, LogOut, MessageSquareText } from "lucide-react"
+import { Expand, LogOut, MessageSquareText, NotebookPen, Plus } from "lucide-react"
 import { useParams, useRouter } from "next/navigation"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { io, Socket } from "socket.io-client"
@@ -57,6 +57,7 @@ export default function GDMeetPage() {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const zegoRef = useRef<any>(null)
   const recognitionRef = useRef<any>(null)
+  const audioStreamRef = useRef<MediaStream | null>(null)
   const hasBeenActiveRef = useRef(false)
   const manualExitRef = useRef(false)
 
@@ -66,9 +67,67 @@ export default function GDMeetPage() {
   const [loading, setLoading] = useState(true)
   const [isFullscreen, setIsFullscreen] = useState(false)
   const [isTranscriptsOpen, setIsTranscriptsOpen] = useState(false)
+  const [isNotesOpen, setIsNotesOpen] = useState(false)
   const [transcriptLoading, setTranscriptLoading] = useState(false)
   const [combinedTranscript, setCombinedTranscript] = useState<GdTranscriptEntry[]>([])
   const [perUserTranscript, setPerUserTranscript] = useState<GdTranscriptPerUser[]>([])
+  const [transcriptCaptureOn, setTranscriptCaptureOn] = useState(true)
+  const [transcriptCaptureError, setTranscriptCaptureError] = useState<string | null>(null)
+  const [speechSupported, setSpeechSupported] = useState(true)
+
+  const stopAllElementStreams = () => {
+    try {
+      const els = Array.from(document.querySelectorAll("video, audio")) as Array<HTMLVideoElement | HTMLAudioElement>
+      for (const el of els) {
+        const anyEl = el as any
+        const src = anyEl?.srcObject
+        if (src && typeof src.getTracks === "function") {
+          try {
+            src.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+          } catch {}
+          try {
+            anyEl.srcObject = null
+          } catch {}
+        }
+      }
+    } catch {}
+  }
+
+  const cleanupCall = () => {
+    stopRecognition()
+    cleanupMic()
+    try {
+      zegoRef.current?.leaveRoom?.()
+    } catch {}
+    try {
+      zegoRef.current?.destroy?.()
+    } catch {}
+    zegoRef.current = null
+    stopAllElementStreams()
+  }
+
+  const notesDraftKey = useMemo(() => {
+    const uid = user?.id ? String(user.id) : "anon"
+    return `gd:notes:draft:${uid}:${roomId}`
+  }, [roomId, user?.id])
+
+  const [notesText, setNotesText] = useState("")
+  const [newNote, setNewNote] = useState("")
+
+  useEffect(() => {
+    try {
+      if (!roomId) return
+      const saved = window.localStorage.getItem(notesDraftKey)
+      if (saved !== null) setNotesText(saved)
+    } catch {}
+  }, [notesDraftKey, roomId])
+
+  useEffect(() => {
+    try {
+      if (!roomId) return
+      window.localStorage.setItem(notesDraftKey, notesText)
+    } catch {}
+  }, [notesDraftKey, notesText, roomId])
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60)
@@ -126,6 +185,38 @@ export default function GDMeetPage() {
     }
   }
 
+  const cleanupMic = () => {
+    if (audioStreamRef.current) {
+      try {
+        audioStreamRef.current.getTracks().forEach((t: MediaStreamTrack) => t.stop())
+      } catch {}
+      audioStreamRef.current = null
+    }
+  }
+
+  const openMic = async (): Promise<boolean> => {
+    try {
+      cleanupMic()
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      })
+      audioStreamRef.current = stream
+      return true
+    } catch (err: any) {
+      const name = err?.name || "Error"
+      if (name === "NotAllowedError") setTranscriptCaptureError("Microphone permission denied")
+      else if (name === "NotFoundError") setTranscriptCaptureError("No microphone device found")
+      else if (name === "NotReadableError") setTranscriptCaptureError("Microphone is in use by another app")
+      else setTranscriptCaptureError("Unable to start microphone")
+      return false
+    }
+  }
+
   const enterFullscreen = async () => {
     try {
       if (!screenRef.current) return
@@ -136,6 +227,7 @@ export default function GDMeetPage() {
 
   const leaveMeeting = () => {
     manualExitRef.current = true
+    cleanupCall()
     try {
       socketRef.current?.emit("gd:leave", { roomId }, () => {})
     } catch {}
@@ -145,43 +237,86 @@ export default function GDMeetPage() {
   const endMeeting = () => {
     if (!socketRef.current) return
     manualExitRef.current = true
+    cleanupCall()
     socketRef.current.emit("gd:end", { roomId }, () => {
-      router.push("/explore/gd")
+      router.push(`/explore/gd/room/${roomId}/analysis`)
     })
   }
 
-  const startRecognition = () => {
+  const startRecognition = async (): Promise<boolean> => {
     try {
       if (recognitionRef.current) return
       const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
-      if (!SpeechRecognition) return
+      if (!SpeechRecognition) {
+        setSpeechSupported(false)
+        setTranscriptCaptureError("Live transcript is not supported in this browser (use Chrome).")
+        return false
+      }
+
+      const micOk = await openMic()
+      if (!micOk) return false
 
       const rec = new SpeechRecognition()
       rec.continuous = true
-      rec.interimResults = false
+      rec.interimResults = true
       rec.lang = "en-US"
 
       rec.onresult = (event: any) => {
         try {
-          const last = event?.results?.[event.results.length - 1]
-          const text = String(last?.[0]?.transcript || "").trim()
-          if (!text) return
-          socketRef.current?.emit("gd:transcript:chunk", { roomId, text })
+          let finals: string[] = []
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const res = event.results[i]
+            const text = String(res?.[0]?.transcript || "").trim()
+            if (!text) continue
+            if (res.isFinal) finals.push(text)
+          }
+          if (!finals.length) return
+          const chunk = finals.join(" ")
+          socketRef.current?.emit("gd:transcript:chunk", { roomId, text: chunk })
         } catch {}
       }
 
-      rec.onerror = () => {}
+      rec.onerror = (event: any) => {
+        const err = String(event?.error || "").toLowerCase()
+        if (err === "not-allowed" || err === "service-not-allowed") {
+          setTranscriptCaptureError("Microphone permission is blocked. Allow mic access and click Enable Transcript again.")
+          setTranscriptCaptureOn(false)
+          stopRecognition()
+          cleanupMic()
+          return
+        }
+        if (err === "audio-capture") {
+          setTranscriptCaptureError("No microphone found or microphone is unavailable.")
+          return
+        }
+        if (err === "network") {
+          setTranscriptCaptureError("Speech recognition network error. Check internet and try again.")
+          return
+        }
+      }
 
       rec.onend = () => {
         // Auto-restart if we are still in active state
         try {
-          if (room?.status === "active") rec.start()
+          if (room?.status === "active" && transcriptCaptureOn) {
+            setTimeout(() => {
+              try {
+                rec.start()
+              } catch {}
+            }, 250)
+          }
         } catch {}
       }
 
       recognitionRef.current = rec
       rec.start()
-    } catch {}
+      setTranscriptCaptureError(null)
+      setSpeechSupported(true)
+      return true
+    } catch {
+      setTranscriptCaptureError("Click Enable Transcript to start live captions.")
+      return false
+    }
   }
 
   const stopRecognition = () => {
@@ -189,6 +324,21 @@ export default function GDMeetPage() {
       recognitionRef.current?.stop?.()
     } catch {}
     recognitionRef.current = null
+  }
+
+  const enableTranscriptCapture = async () => {
+    setTranscriptCaptureError(null)
+    setTranscriptCaptureOn(true)
+    const ok = await startRecognition()
+    if (!ok) {
+      setTranscriptCaptureOn(false)
+    }
+  }
+
+  const disableTranscriptCapture = () => {
+    setTranscriptCaptureOn(false)
+    stopRecognition()
+    cleanupMic()
   }
 
   useEffect(() => {
@@ -217,6 +367,14 @@ export default function GDMeetPage() {
       if (data.status === "active") {
         hasBeenActiveRef.current = true
         setError(null)
+
+        // During the 1-minute preparation phase, startedAt can be null.
+        // Show full duration until the server starts the real timer broadcast.
+        if (!data.startedAt && typeof data.durationSeconds === "number") {
+          setRemainingSeconds(data.durationSeconds)
+          router.replace(`/explore/gd/room/${roomId}/prep`)
+          return
+        }
       }
       if (data.status === "waiting" && !hasBeenActiveRef.current) {
         setError("Waiting for host to start...")
@@ -226,13 +384,58 @@ export default function GDMeetPage() {
           startRecognition()
         } catch {}
       }
+
+      if (data.status === "completed") {
+        router.replace(`/explore/gd/room/${roomId}/analysis`)
+      }
     })
 
     socket.on("gd:timer", (data: { remainingSeconds: number }) => {
       setRemainingSeconds(data.remainingSeconds)
     })
 
+    socket.on(
+      "gd:transcript:chunk",
+      (payload: { roomId: string; userId: string; name: string; text: string; createdAt: string | Date }) => {
+        try {
+          if (!payload?.text) return
+          if (String(payload.roomId || "").trim().toUpperCase() !== roomId) return
+
+          const createdAt = new Date(payload.createdAt as any).toISOString()
+          const entry: GdTranscriptEntry = {
+            userId: String(payload.userId || ""),
+            name: String(payload.name || ""),
+            text: String(payload.text || ""),
+            createdAt,
+          }
+
+          setCombinedTranscript((prev) => {
+            const key = `${entry.userId}|${entry.createdAt}|${entry.text}`
+            const exists = prev.some((e) => `${e.userId}|${e.createdAt}|${e.text}` === key)
+            if (exists) return prev
+            return [...prev, entry]
+          })
+
+          setPerUserTranscript((prev) => {
+            const idx = prev.findIndex((u) => String(u.userId) === String(entry.userId))
+            if (idx === -1) {
+              return [...prev, { userId: entry.userId, name: entry.name, entries: [{ text: entry.text, createdAt }] }]
+            }
+            const clone = [...prev]
+            const existingUser = clone[idx]
+            const entryKey = `${createdAt}|${entry.text}`
+            const already = existingUser.entries.some((e) => `${e.createdAt}|${e.text}` === entryKey)
+            if (!already) {
+              clone[idx] = { ...existingUser, entries: [...existingUser.entries, { text: entry.text, createdAt }] }
+            }
+            return clone
+          })
+        } catch {}
+      },
+    )
+
     socket.on("gd:ended", () => {
+      cleanupCall()
       router.replace("/explore/gd")
     })
 
@@ -244,10 +447,10 @@ export default function GDMeetPage() {
       }
       setRoom(res.room)
       setLoading(false)
-      if (res.room?.status === "active" && !recognitionRef.current) {
-        try {
-          startRecognition()
-        } catch {}
+      if (res.room?.status === "active" && transcriptCaptureOn && !recognitionRef.current) {
+        startRecognition().then((ok) => {
+          if (!ok) setTranscriptCaptureOn(false)
+        })
       }
     })
 
@@ -302,7 +505,7 @@ export default function GDMeetPage() {
           setError(null)
         }
         if (status === "completed") {
-          router.replace("/explore/gd")
+          router.replace(`/explore/gd/room/${roomId}/analysis`)
         }
         if (status === "waiting" && !hasBeenActiveRef.current) {
           setError("Waiting for host to start...")
@@ -319,14 +522,16 @@ export default function GDMeetPage() {
   }, [roomId, token, router])
 
   useEffect(() => {
-    if (!loading && room?.status === "active") {
+    if (!loading && room?.status === "active" && room?.startedAt) {
       loadZego()
-      if (!recognitionRef.current) {
-        startRecognition()
+      if (transcriptCaptureOn && !recognitionRef.current) {
+        startRecognition().then((ok) => {
+          if (!ok) setTranscriptCaptureOn(false)
+        })
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading, room?.status])
+  }, [loading, room?.status, room?.startedAt])
 
   useEffect(() => {
     const onFsChange = () => {
@@ -339,10 +544,8 @@ export default function GDMeetPage() {
   useEffect(() => {
     return () => {
       try {
-        zegoRef.current?.destroy?.()
+        cleanupCall()
       } catch {}
-      zegoRef.current = null
-      stopRecognition()
     }
   }, [])
 
@@ -418,6 +621,16 @@ export default function GDMeetPage() {
                   Transcripts
                 </Button>
 
+                {transcriptCaptureOn ? (
+                  <Button className="rounded-xl bg-emerald-600 hover:bg-emerald-700" onClick={disableTranscriptCapture}>
+                    Transcript On
+                  </Button>
+                ) : (
+                  <Button className="rounded-xl bg-amber-500 hover:bg-amber-600" onClick={enableTranscriptCapture}>
+                    Enable Transcript
+                  </Button>
+                )}
+
                 {!isHost && (
                   <Button className="rounded-xl bg-red-600 hover:bg-red-700" onClick={leaveMeeting}>
                     <LogOut className="h-4 w-4 mr-2" />
@@ -437,6 +650,12 @@ export default function GDMeetPage() {
           {error && (
             <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs font-semibold text-red-200">
               {error}
+            </div>
+          )}
+
+          {(transcriptCaptureError || !speechSupported) && (
+            <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs font-semibold text-amber-200">
+              {speechSupported ? transcriptCaptureError : "Live transcript is not supported in this browser (use Chrome)."}
             </div>
           )}
         </div>
@@ -499,6 +718,55 @@ export default function GDMeetPage() {
               </TabsContent>
             </Tabs>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isNotesOpen}
+        onOpenChange={(v) => {
+          setIsNotesOpen(v)
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Your Notes</DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="flex gap-2">
+              <input
+                value={newNote}
+                onChange={(e) => setNewNote(e.target.value)}
+                placeholder="Add a quick note..."
+                className="flex-1 h-9 rounded-md border bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+              />
+              <Button
+                className="h-9"
+                onClick={() => {
+                  const t = newNote.trim()
+                  if (!t) return
+                  const stamp = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                  const entry = `• [${stamp}] ${t}`
+                  setNotesText((prev) => (prev.trim() ? `${prev.trim()}\n${entry}\n` : `${entry}\n`))
+                  setNewNote("")
+                }}
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add
+              </Button>
+            </div>
+
+            <div className="rounded-lg border bg-muted/40 p-3">
+              <p className="text-xs font-semibold text-muted-foreground">Saved notes (only visible to you)</p>
+              <textarea
+                value={notesText}
+                onChange={(e) => setNotesText(e.target.value)}
+                placeholder="Write points you want to remember during the GD..."
+                className="mt-2 w-full min-h-64 rounded-md border bg-background p-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-violet-200"
+              />
+              <p className="mt-2 text-xs text-muted-foreground">Auto-saved on this device for this room.</p>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </>
