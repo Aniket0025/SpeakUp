@@ -15,7 +15,7 @@ const gdRoomSchema = new mongoose.Schema(
         roomId: { type: String, required: true, unique: true, index: true },
         roomName: { type: String, required: true },
         topic: { type: String, default: "" },
-        mode: { type: String, enum: ["custom", "global"], default: "custom" },
+        mode: { type: String, enum: ["custom", "global", "tournament"], default: "custom" },
         maxParticipants: { type: Number, default: 5 },
         durationSeconds: { type: Number, default: 600 },
         prepStartedAt: { type: Date },
