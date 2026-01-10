@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import connectDB from "./config/db.js";
 import authRoutes from "./routes/authRoutes.js";
 import gdRoutes from "./routes/gdRoutes.js";
+import tournamentRoutes from "./routes/tournamentRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import zegoRoutes from "./routes/zegoRoutes.js";
 import ExtemporeSession from "./schema/ExtemporeSession.js";
@@ -19,7 +20,6 @@ import User from "./schema/User.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, ".env") });
-
 const app = express();
 
 app.use(cors({ origin: true, credentials: true }));
@@ -31,6 +31,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/gd", gdRoutes);
 app.use("/api/user", userRoutes);
 app.use("/api/zego", zegoRoutes);
+app.use("/api/tournaments", tournamentRoutes);
 
 app.get("/", (req, res) => {
     res.status(200).json({ status: "ok" });
@@ -49,6 +50,8 @@ const io = new SocketIOServer(server, {
         methods: ["GET", "POST"],
     },
 });
+
+app.set("io", io);
 
 // In-memory GD rooms (ephemeral; resets on server restart)
 const gdRooms = new Map();
@@ -352,6 +355,20 @@ io.use(async (socket, next) => {
 });
 
 io.on("connection", (socket) => {
+    // ---- Tournaments realtime subscriptions ----
+    socket.on("tournaments:subscribe", () => {
+        try {
+            socket.join("tournaments");
+        } catch { }
+    });
+    socket.on("tournament:subscribe", (payload) => {
+        try {
+            const id = String(payload?.tournamentId || "").trim().toUpperCase();
+            if (!id) return;
+            socket.join(`tournament:${id}`);
+        } catch { }
+    });
+
     // ---- GD: Create / Join / Start with realtime timer ----
     socket.on("gd:create", async (payload, cb) => {
         try {

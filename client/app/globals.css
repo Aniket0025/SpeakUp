@@ -134,6 +134,24 @@
   }
 }
 
+@layer base {
+  button,
+  [role="button"],
+  a[href],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"],
+  summary,
+  label,
+  .clickable {
+    cursor: pointer;
+  }
+  :disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 /* Custom animations */
 @keyframes float {
   0%,
